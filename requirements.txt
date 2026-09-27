@@ -1,0 +1,14 @@
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+xgboost>=2.0
+shap>=0.45
+fastapi>=0.110
+uvicorn[standard]>=0.30
+python-dotenv>=1.0
+streamlit>=1.38
+requests>=2.32
+# Optional LLM SDKs (choose one)
+openai>=1.40  # for OpenAI ChatGPT
+# google-generativeai>=0.8  # for Google Gemini
+sqlite3  # built‑in, listed for completeness
