@@ -1,0 +1,2121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EquipmentHealth — RS-380 Motor Console</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <meta name="description" content="Real-time prognostics, health monitoring, and RUL prediction for the RS-380 industrial motor.">
+  <!-- All assets served locally — no CDN dependency -->
+  <script src="js/lucide.min.js?v=20260929_fix2"></script>
+  <script src="js/gsap.min.js"></script>
+  <link rel="stylesheet" href="css/fonts.css?v=20260929_fix2">
+  <script src="js/chart.min.js"></script>
+  <script src="js/chatbot.js?v=20260930_v4"></script>
+  <link rel="stylesheet" href="css/app.css?v=20260929_fix2">
+  <link rel="stylesheet" href="css/pro.css?v=20260930_v4">
+  <style>
+    /* ── Page-level overrides ── */
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* Section visibility */
+    .page-section { display: none; }
+    .page-section.is-active { display: block; }
+
+    /* Grid helpers */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+    /* Sensor grid */
+    .sensor-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+    }
+    .sensor-tile {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      overflow: hidden;
+    }
+    .sensor-tile::after {
+      content: '';
+      position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+      background: var(--s-color, var(--accent));
+    }
+    .sensor-tile-label {
+      font-size: .67rem; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--faint); margin-bottom: 6px;
+    }
+    .sensor-tile-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.55rem; font-weight: 600; color: var(--ink);
+      line-height: 1;
+    }
+    .sensor-tile-unit {
+      font-size: .72rem; color: var(--muted); margin-top: 4px;
+    }
+
+    /* Trend sparkline row */
+    .sparkline-wrap { height: 36px; margin-top: 8px; }
+    .sparkline-wrap canvas { width: 100% !important; height: 36px !important; }
+
+    /* Health arc */
+    .health-arc-wrap { position: relative; display: flex; align-items: center; justify-content: center; }
+    .health-arc-wrap canvas { display: block; }
+    .health-arc-label {
+      position: absolute; text-align: center;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    .health-arc-score {
+      font-family: var(--font-head); font-weight: 800;
+      font-size: 2.4rem; line-height: 1; color: var(--ink);
+    }
+    .health-arc-sub { font-size: .68rem; color: var(--faint); margin-top: 4px; text-transform: uppercase; letter-spacing: .08em; }
+
+    /* RUL confidence band */
+    .rul-band {
+      display: flex; align-items: center; gap: 12px; margin-top: 10px;
+      font-size: .78rem;
+    }
+    .rul-band-bar {
+      flex: 1; height: 8px; background: var(--surface-alt);
+      border-radius: 999px; overflow: hidden; position: relative;
+    }
+    .rul-band-fill {
+      height: 100%; border-radius: 999px;
+      background: linear-gradient(90deg, var(--ok) 0%, var(--accent) 100%);
+      transition: width .6s var(--ease-out);
+    }
+
+    /* Prognostics — SHAP bars */
+    .bar-row { display: grid; grid-template-columns: 140px 1fr 80px; align-items: center; gap: 12px; padding: 9px 0; }
+    .bar-row + .bar-row { border-top: 1px solid var(--border); }
+    .bar-name { font-size: .84rem; font-weight: 600; }
+    .bar-track { display: block; height: 9px; background: var(--surface-alt); border-radius: 999px; overflow: hidden; }
+    .bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .5s var(--ease-out); }
+    .bar-val { text-align: right; font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    /* Hour histogram */
+    .hours { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; align-items: end; height: 120px; }
+    .hour-col { display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+    .hour-bar { background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; transition: background-color .15s; }
+    .hour-col[data-empty="true"] .hour-bar { background: var(--border); }
+    .hour-axis { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; margin-top: 6px; }
+    .hour-axis span { font-size: .54rem; color: var(--faint); text-align: center; }
+    .chart-empty { display: flex; align-items: center; justify-content: center; height: 120px; color: var(--faint); font-size: .84rem; }
+
+    /* Alerts */
+    .active-list { display: flex; flex-direction: column; gap: 10px; }
+    .active-row {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 13px 16px; border-radius: var(--radius);
+      border: 1px solid #fcd9a8; background: var(--hazard-soft);
+    }
+    .active-row.is-warning { border-color: #ecccbf; background: var(--accent-soft); }
+    .active-row.is-ok { border-color: #c3ddcd; background: var(--ok-soft); }
+    .active-row-top { display: flex; align-items: flex-start; gap: 10px; }
+    .active-row-top i { margin-top: 3px; flex-shrink: 0; color: var(--hazard); }
+    .active-row.is-warning .active-row-top i { color: var(--accent); }
+    .active-row.is-ok .active-row-top i { color: var(--ok); }
+    .active-row .msg { flex: 1; font-size: .86rem; color: var(--ink); }
+    .active-row .msg strong { font-weight: 700; }
+    .active-row-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-left: 26px; }
+    .active-row .when { font-size: .72rem; color: var(--faint); }
+
+    /* Timeline trail */
+    .trail { padding: 4px 0 4px 30px; position: relative; }
+    .trail::before { content: ''; position: absolute; left: 9px; top: 12px; bottom: 12px; width: 2px; background: var(--border); }
+    .entry { position: relative; padding: 14px 0; }
+    .entry + .entry { border-top: 1px solid var(--border); }
+    .entry::before {
+      content: ''; position: absolute; left: -25px; top: 20px;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--surface); border: 2px solid var(--border);
+    }
+    .entry[data-severity="critical"]::before { border-color: var(--hazard); background: var(--hazard-soft); }
+    .entry[data-severity="warning"]::before { border-color: var(--accent); background: var(--accent-soft); }
+    .entry-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .entry-kind { font-weight: 600; font-size: .9rem; }
+    .entry-when { font-size: .74rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+    .entry-summary { font-size: .86rem; color: var(--muted); margin-top: 3px; }
+
+    /* Waveforms */
+    .osc-wrap { background: #0b1120; border-radius: var(--radius); padding: 12px; }
+    .osc-wrap canvas { display: block; width: 100% !important; }
+
+    /* Calibration */
+    .req-item {
+      display: flex; align-items: center; gap: 13px;
+      padding: 14px 16px; border: 1px solid var(--border);
+      border-radius: var(--radius); cursor: pointer;
+      transition: border-color .15s, background-color .15s;
+    }
+    .req-item + .req-item { margin-top: 10px; }
+    .req-item:hover { background: var(--surface-alt); }
+    .req-item.is-on { border-color: #e0c3b6; background: var(--accent-soft); }
+    .req-item input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+    .req-name { display: block; font-weight: 600; font-size: .9rem; }
+    .req-note { display: block; font-size: .74rem; color: var(--muted); margin-top: 2px; }
+    .slider-row { display: flex; align-items: center; gap: 16px; }
+    .slider-row input[type=range] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+    .slider-val { font-family: var(--font-head); font-weight: 700; font-size: 1.5rem; min-width: 68px; text-align: right; font-variant-numeric: tabular-nums; }
+    .scale { display: flex; justify-content: space-between; font-size: .72rem; color: var(--faint); margin-top: 6px; }
+    .save-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 14px; flex-wrap: wrap; padding: 14px 16px;
+      border: 1px solid var(--border); border-radius: var(--radius-md);
+      background: var(--surface); box-shadow: var(--shadow);
+    }
+    .save-note { font-size: .82rem; color: var(--muted); }
+    .save-note.is-saved { color: var(--ok); font-weight: 600; }
+
+    /* Range group */
+    .range-group { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+    .range-btn { padding: 6px 14px; font-size: .76rem; font-weight: 600; background: var(--surface); color: var(--muted); border: none; cursor: pointer; transition: background-color .15s, color .15s; }
+    .range-btn + .range-btn { border-left: 1px solid var(--border); }
+    .range-btn.is-active { background: var(--accent); color: #fff; }
+
+    /* Delta */
+    .delta { font-size: .72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+    .delta.up { color: var(--ok); }
+    .delta.dn { color: var(--danger); }
+
+    /* Trend SVG */
+    .trend-svg { width: 100%; height: 150px; display: block; overflow: visible; }
+
+    /* Status pill */
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border-radius: 999px; font-size: .72rem; font-weight: 700;
+      border: 1px solid;
+    }
+    .status-pill.good { color: var(--ok); border-color: #c3ddcd; background: var(--ok-soft); }
+    .status-pill.warning { color: var(--hazard); border-color: #fcd9a8; background: var(--hazard-soft); }
+    .status-pill.critical { color: var(--danger); border-color: #f0cac7; background: var(--danger-soft); }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: blip 2s infinite; }
+    @keyframes blip { 0%,100% { opacity:1; } 50% { opacity:.25; } }
+
+    /* mb helpers */
+    .mb-3 { margin-bottom: 12px; }
+    .mb-4 { margin-bottom: 16px; }
+    .mb-5 { margin-bottom: 20px; }
+    .mt-4 { margin-top: 16px; }
+    .mt-5 { margin-top: 20px; }
+    .gap-2 { gap: 8px; }
+
+    /* ══════════════ LUCIDE SVG ICON SYSTEM ══════════════ */
+    /* pro.css handles all sizing — just the nav-label flex fix here */
+    .nav-item {
+      display: flex !important;
+      align-items: center !important;
+      gap: 10px !important;
+    }
+    .nav-item .nav-label {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ══════════════ SECTION TRANSITIONS ══════════════ */
+    @keyframes sectionIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    /* CSS fallback — GSAP takes over when loaded */
+    .page-section.is-active {
+      animation: sectionIn 240ms var(--ease-out) both;
+    }
+
+    /* ══════════════ SENSOR TILE HOVER (PPE accent bar) ══════════════ */
+    .sensor-tile {
+      transition:
+        box-shadow var(--dur-fast) var(--ease-out),
+        transform  var(--dur-fast) var(--ease-out);
+    }
+    .sensor-tile:hover {
+      box-shadow: var(--shadow-lift);
+      transform: translateY(-2px);
+    }
+    /* The left accent bar widens slightly on hover */
+    .sensor-tile::after  { transition: width var(--dur-fast); }
+    .sensor-tile:hover::after { width: 4px; }
+
+    /* ══════════════ WAVEFORM — DARK OSCILLOSCOPE ══════════════ */
+    .osc-wrap {
+      background: #0b1120 !important;
+      border-radius: var(--radius);
+      padding: 12px;
+      box-shadow: inset 0 1px 4px rgba(0,0,0,.45);
+    }
+    .osc-wrap canvas { display: block; width: 100% !important; }
+
+    /* ══════════════ TIMELINE TRAIL HOVER ══════════════ */
+    .trail .entry::before {
+      transition: transform 200ms var(--ease-out), background-color 200ms;
+    }
+    .trail .entry:hover::before {
+      transform: scale(1.5);
+      background: var(--accent);
+    }
+
+    /* ══════════════ LIVE DOT — PPE pulse + glow ══════════════ */
+    @keyframes livePulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(47,107,70,.5); }
+      50%      { box-shadow: 0 0 0 5px rgba(47,107,70,0); }
+    }
+    .live-pill.is-live .live-dot {
+      animation: livePulse 1.8s ease-in-out infinite !important;
+    }
+
+    /* ══════════════ TOPBAR SCROLL SHADOW ══════════════ */
+    .topbar { transition: box-shadow 200ms; }
+
+  </style>
+</head>
+<body>
+<div class="app" id="appRoot">
+  <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+  <aside class="sidebar" id="appSidebar" data-role="admin">
+    <div class="sidebar-brand-row">
+      <a href="#" class="sidebar-brand" onclick="navigate('overview');return false;" title="EquipmentHealth">
+        <span class="sidebar-mark"><i data-lucide="cpu" aria-hidden="true"></i></span>
+        <span class="sidebar-brand-text">
+          <span class="sidebar-name">EquipmentHealth</span><br>
+          <span class="sidebar-sub">RS-380 Prognostics</span>
+        </span>
+      </a>
+      <button class="sidebar-collapse-btn" id="menuToggle" aria-label="Toggle navigation" aria-expanded="true">
+        <svg id="menuToggleIcon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav" aria-label="Main">
+      <div class="sidebar-section">Operations</div>
+      <a href="#" class="nav-item is-active" id="nav-overview" onclick="navigate('overview');return false;" title="SCADA Overview">
+        <i data-lucide="gauge" aria-hidden="true"></i><span class="nav-label">SCADA Overview</span>
+      </a>
+      <a href="#" class="nav-item" id="nav-prognostics" onclick="navigate('prognostics');return false;" title="Prognostics">
+        <i data-lucide="trending-up" aria-hidden="true"></i><span class="nav-label">Prognostics</span>
+      </a>
+      <a href="#" class="nav-item" id="nav-alerts" onclick="navigate('alerts');return false;" title="Anomaly Alerts">
+        <i data-lucide="alert-triangle" aria-hidden="true"></i><span class="nav-label">Anomaly Alerts</span>
+      </a>
+      <a href="#" class="nav-item" id="nav-waveforms" onclick="navigate('waveforms');return false;" title="Waveform Captures">
+        <i data-lucide="activity" aria-hidden="true"></i><span class="nav-label">Waveform Captures</span>
+      </a>
+
+      <div class="sidebar-section">Management</div>
+      <a href="#" class="nav-item" id="nav-reports" onclick="navigate('reports');return false;" title="Reports">
+        <i data-lucide="file-text" aria-hidden="true"></i><span class="nav-label">Reports</span>
+      </a>
+      <a href="#" class="nav-item" id="nav-calibration" onclick="navigate('calibration');return false;" title="Calibration">
+        <i data-lucide="sliders-horizontal" aria-hidden="true"></i><span class="nav-label">Calibration</span>
+      </a>
+      <a href="#" class="nav-item" id="nav-audit" onclick="navigate('audit');return false;" title="Audit Log">
+        <i data-lucide="scroll" aria-hidden="true"></i><span class="nav-label">Audit Log</span>
+      </a>
+
+      <div class="sidebar-section">System</div>
+      <a href="#" class="nav-item" id="nav-sysinfo" onclick="navigate('sysinfo');return false;" title="System Info">
+        <i data-lucide="server" aria-hidden="true"></i><span class="nav-label">System Info</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="live-pill is-live" style="flex:1;justify-content:center">
+          <span class="live-dot"></span><span class="btn-label">Live</span>
+        </span>
+        <button class="btn btn-outline btn-sm" onclick="toggleStream(this)" title="Pause stream">
+          <i data-lucide="pause" aria-hidden="true"></i><span class="btn-label">Pause</span>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════ MAIN ═══════════════════ -->
+  <main class="main">
+    <!-- Topbar -->
+    <header class="topbar" id="appTopbar">
+      <div style="display:flex;align-items:center;gap:14px;min-width:0">
+        <button class="btn btn-outline btn-sm menu-toggle-mobile" id="menuToggleMobile" aria-label="Open navigation">
+          <i data-lucide="menu" aria-hidden="true"></i>
+        </button>
+        <div style="min-width:0">
+          <h1 id="topbarTitle">SCADA Overview</h1>
+          <div class="topbar-sub" id="topbarSub">Real-time telemetry, health index, and remaining useful life</div>
+        </div>
+      </div>
+      <div id="topbarSlot" style="display:flex;align-items:center;gap:10px">
+        <span class="live-pill is-live" id="globalLivePill">
+          <span class="live-dot"></span>Live · <span id="liveHz">2</span> Hz
+        </span>
+        <button class="btn btn-outline btn-sm" onclick="exportCSV()">
+          <i data-lucide="file-spreadsheet" aria-hidden="true"></i><span class="btn-label">Export</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Content -->
+    <div class="content">
+
+      <!-- ════════════ SECTION: OVERVIEW ════════════ -->
+      <section class="page-section is-active" id="sec-overview">
+
+        <!-- Top sub-header bar (matching Prognostics layout) -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
+          <p style="font-size:.82rem;color:var(--faint);margin:0">
+            <i data-lucide="info"></i>
+            Continuous SCADA Telemetry &amp; RUL Prognostics — streaming @ 2 Hz.
+          </p>
+          <div class="range-group" id="overviewRangeGroup">
+            <button class="range-btn is-active" data-w="live">Live</button>
+            <button class="range-btn" data-w="1h">1 hr</button>
+            <button class="range-btn" data-w="24h">24 hrs</button>
+          </div>
+        </div>
+
+        <!-- KPI rail (identical clean aesthetic to Prognostics) -->
+        <div class="metrics mb-5">
+          <div class="metric" style="--m-accent: var(--ok)">
+            <div class="metric-label"><i data-lucide="activity"></i> Health Index</div>
+            <div class="metric-value mono" id="mHealthIdx">—</div>
+            <div class="metric-foot" id="mHealthFoot">Healthy — low degradation</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--info)">
+            <div class="metric-label"><i data-lucide="history"></i> Est. RUL</div>
+            <div class="metric-value mono" id="mRul">—</div>
+            <div class="metric-foot" id="mRulFoot">hours to threshold</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--accent)">
+            <div class="metric-label"><i data-lucide="trending-up"></i> RMS Deviation</div>
+            <div class="metric-value mono" id="mRms">—</div>
+            <div class="metric-foot" id="mRmsFoot">vibration delta baseline</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--hazard)">
+            <div class="metric-label"><i data-lucide="alert-triangle"></i> Top Contributor</div>
+            <div class="metric-value mono" id="mTopContrib">—</div>
+            <div class="metric-foot" id="mTopContribFoot">primary driver: Vib X</div>
+          </div>
+        </div>
+
+        <!-- Sensor grid (perfect 3x2 6-tile grid) + Equipment Condition Assessment Card -->
+        <div class="grid-2 mb-5">
+          <!-- 6-tile live sensor feed (perfectly balanced 3x2 grid, NO empty hole!) -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="cpu"></i> Live Sensor Telemetry</span>
+              <span id="statusBadge" class="status-pill good">
+                <span class="status-dot"></span><span id="statusText">NORMAL</span>
+              </span>
+            </div>
+            <div class="card-body">
+              <div class="sensor-grid" id="sensorGrid">
+                <!-- 6 tiles populated dynamically by JS: Vib X, Vib Y, Vib Z, Temp, Current, Kurtosis -->
+              </div>
+            </div>
+          </section>
+
+          <!-- Modern Condition & Prognostics Assessment (clean bars & stats matching Prognostics) -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="shield-check"></i> Asset Condition &amp; Health State</span>
+              <span class="live-pill is-live" style="font-size:.65rem;padding:3px 9px"><span class="live-dot"></span>Active</span>
+            </div>
+            <div class="card-body" style="display:flex;flex-direction:column;gap:16px">
+              <!-- Health Score & Status Bar -->
+              <div>
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+                  <div style="font-size:.82rem;font-weight:600;color:var(--ink)">Equipment Health Score</div>
+                  <div style="display:flex;align-items:baseline;gap:6px">
+                    <span class="mono" style="font-size:1.6rem;font-weight:700;color:var(--ok)" id="healthScoreDisplay">98.2%</span>
+                    <span class="badge badge-ok" id="healthBadgeDisplay">Normal</span>
+                  </div>
+                </div>
+                <div style="height:10px;background:var(--surface-alt);border-radius:999px;overflow:hidden;position:relative;border:1px solid var(--border)">
+                  <div id="healthBarFill" style="height:100%;width:98%;background:linear-gradient(90deg, #2f6b46, #4ade80);border-radius:999px;transition:width .4s var(--ease-out)"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:.68rem;color:var(--faint);margin-top:4px">
+                  <span>0% Critical</span>
+                  <span>40% Warning</span>
+                  <span>70% Nominal</span>
+                  <span>100% Peak</span>
+                </div>
+              </div>
+
+              <!-- RUL Confidence Interval -->
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--muted);margin-bottom:6px">
+                  <span>Remaining Useful Life (CI)</span>
+                  <span class="mono" style="font-weight:600;color:var(--ink)" id="rulBandText">—</span>
+                </div>
+                <div class="rul-band-bar" style="height:8px">
+                  <div class="rul-band-fill" id="rulBandFill" style="width:60%"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:.68rem;color:var(--faint);margin-top:4px">
+                  <span id="rulLo">CI low: 2,827 h</span>
+                  <span id="rulHi">CI high: 3,597 h</span>
+                </div>
+              </div>
+
+              <!-- Structured Key-Value Specs (matching PPE checkpoint status rows) -->
+              <div style="display:flex;flex-direction:column;gap:10px;padding-top:8px;border-top:1px solid var(--border)">
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:.82rem">
+                  <span style="color:var(--muted)"><i data-lucide="wrench" style="width:13px;height:13px;margin-right:6px"></i>Maintenance Window</span>
+                  <span class="badge badge-ok" id="maintBadge">OK — 3,212 h remaining</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:.82rem">
+                  <span style="color:var(--muted)"><i data-lucide="thermometer" style="width:13px;height:13px;margin-right:6px"></i>Motor Core Temp</span>
+                  <span class="mono" style="font-weight:600;color:var(--ink)" id="motorTemp">42.0 °C</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:.82rem">
+                  <span style="color:var(--muted)"><i data-lucide="clock" style="width:13px;height:13px;margin-right:6px"></i>Runtime Today</span>
+                  <span class="mono" style="font-weight:600;color:var(--ink)" id="opHours">1.1 h</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- DC Power Distribution & 4S Battery Pack Subsystem Card -->
+        <section class="card mb-5">
+          <div class="card-head">
+            <span class="card-title"><i data-lucide="zap"></i> DC Power Distribution &amp; 4S Battery Pack Telemetry</span>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span class="badge badge-ok" id="pwrStatusBadge">Bus Stable &bull; 14.8V</span>
+              <span class="live-pill is-live" style="font-size:.65rem;padding:3px 9px"><span class="live-dot"></span>Power Telemetry</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="power-grid">
+              <!-- Column 1: Current Telemetry -->
+              <div class="power-col">
+                <div class="power-col-header">
+                  <span class="power-col-title"><i data-lucide="gauge"></i> Current Telemetry (ACS715)</span>
+                  <span class="badge badge-info" id="currSplitBadge">81.5% Motor</span>
+                </div>
+                <div class="power-stat-pair">
+                  <div class="power-stat-box">
+                    <div class="power-stat-label">Total System Current</div>
+                    <div class="power-stat-val" id="pwrTotCurr">2.824 A</div>
+                    <div class="power-stat-sub">Battery Bus Aggregate</div>
+                  </div>
+                  <div class="power-stat-box">
+                    <div class="power-stat-label">Motor Load Current</div>
+                    <div class="power-stat-val" id="pwrMotCurr" style="color:var(--accent)">2.301 A</div>
+                    <div class="power-stat-sub">Armature Conduction</div>
+                  </div>
+                </div>
+                <div>
+                  <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted);margin-bottom:5px">
+                    <span>Current Distribution (Motor vs Aux)</span>
+                    <span class="mono" id="pwrAuxSub">Aux MCU: 0.523 A</span>
+                  </div>
+                  <div style="height:8px;background:var(--surface);border-radius:999px;overflow:hidden;border:1px solid var(--border)">
+                    <div id="pwrCurrBarFill" style="height:100%;width:81.5%;background:linear-gradient(90deg, var(--accent), var(--hazard));border-radius:999px;transition:width .3s var(--ease-out)"></div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:.67rem;color:var(--faint);margin-top:3px">
+                    <span>Motor Armature (81.5%)</span>
+                    <span>Aux Logic &amp; Sensors (18.5%)</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Column 2: Voltage Regulation -->
+              <div class="power-col">
+                <div class="power-col-header">
+                  <span class="power-col-title"><i data-lucide="activity"></i> Voltage Regulation Rail</span>
+                  <span class="badge badge-ok" id="pwrVoltEff">81.2% Transfer</span>
+                </div>
+                <div class="power-stat-pair">
+                  <div class="power-stat-box">
+                    <div class="power-stat-label">Total Pack Voltage</div>
+                    <div class="power-stat-val" id="pwrTotVolt">14.82 V</div>
+                    <div class="power-stat-sub">4S Pack Direct Sum</div>
+                  </div>
+                  <div class="power-stat-box">
+                    <div class="power-stat-label">Motor Voltage</div>
+                    <div class="power-stat-val" id="pwrMotVolt" style="color:var(--info)">12.04 V</div>
+                    <div class="power-stat-sub">Terminal PWM Drive</div>
+                  </div>
+                </div>
+                <div>
+                  <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted);margin-bottom:5px">
+                    <span>Forward Conduction Drop (ΔV)</span>
+                    <span class="mono" id="pwrVoltDrop">&Delta; 2.78 V Drop</span>
+                  </div>
+                  <div style="height:8px;background:var(--surface);border-radius:999px;overflow:hidden;border:1px solid var(--border)">
+                    <div id="pwrVoltBarFill" style="height:100%;width:81.2%;background:linear-gradient(90deg, var(--info), var(--ok));border-radius:999px;transition:width .3s var(--ease-out)"></div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:.67rem;color:var(--faint);margin-top:3px">
+                    <span>MOSFET conduction drop: 2.78 V</span>
+                    <span>Nominal RS-380: 12.0 V</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Column 3: 4S Battery Pack Cell Telemetry -->
+              <div class="power-col">
+                <div class="power-col-header">
+                  <span class="power-col-title"><i data-lucide="battery-charging"></i> 4S Battery Pack Cells</span>
+                  <span class="badge badge-ok" id="pwrCellBadge">Balanced &bull; &Delta; 22 mV</span>
+                </div>
+                <div class="cell-bars-grid">
+                  <div class="cell-row">
+                    <span class="cell-name">Cell 1</span>
+                    <div class="cell-track"><div class="cell-fill" id="pwrCellBar1" style="width:75%"></div></div>
+                    <span class="cell-volt" id="pwrCell1">3.715 V</span>
+                  </div>
+                  <div class="cell-row">
+                    <span class="cell-name">Cell 2</span>
+                    <div class="cell-track"><div class="cell-fill" id="pwrCellBar2" style="width:74%"></div></div>
+                    <span class="cell-volt" id="pwrCell2">3.702 V</span>
+                  </div>
+                  <div class="cell-row">
+                    <span class="cell-name">Cell 3</span>
+                    <div class="cell-track"><div class="cell-fill" id="pwrCellBar3" style="width:75%"></div></div>
+                    <span class="cell-volt" id="pwrCell3">3.710 V</span>
+                  </div>
+                  <div class="cell-row">
+                    <span class="cell-name">Cell 4</span>
+                    <div class="cell-track"><div class="cell-fill" id="pwrCellBar4" style="width:73%"></div></div>
+                    <span class="cell-volt" id="pwrCell4">3.693 V</span>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:.68rem;color:var(--faint);padding-top:4px;border-top:1px solid var(--border)">
+                  <span id="pwrCellDelta">Imbalance: 22 mV</span>
+                  <span>Health: 99.4% &bull; Li-ion 4S</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Trajectory chart (smooth matching Prognostics chart) -->
+        <section class="card mb-5">
+          <div class="card-head">
+            <span class="card-title"><i data-lucide="trending-up"></i> Health &amp; RUL Trajectory</span>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:.72rem;color:var(--faint)">
+                <span style="color:var(--ok)">&#9632;</span> Health &nbsp;
+                <span style="color:var(--accent)">&#9632;</span> RUL (norm)
+              </span>
+              <div class="range-group" id="trajRangeGroup">
+                <button class="range-btn is-active" data-w="60">1 min</button>
+                <button class="range-btn" data-w="300">5 min</button>
+                <button class="range-btn" data-w="900">15 min</button>
+              </div>
+            </div>
+          </div>
+          <div class="card-body" style="padding:16px 16px 12px">
+            <canvas id="trajChart" height="160"></canvas>
+          </div>
+        </section>
+
+        <!-- Telemetry log table (compact, capped stream) -->
+        <section class="card">
+          <div class="card-head">
+            <span class="card-title"><i data-lucide="list"></i> Telemetry Log Feed</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:.72rem;color:var(--faint)" id="logCount">10 records</span>
+              <button class="btn btn-outline btn-sm" onclick="clearLog()"><i data-lucide="trash-2"></i> Clear</button>
+            </div>
+          </div>
+          <div class="table-wrap" style="max-height: 320px; overflow-y: auto;">
+            <table class="data">
+              <thead style="position: sticky; top: 0; background: var(--surface-alt); z-index: 2;">
+                <tr>
+                  <th>Time</th>
+                  <th>Vib X</th>
+                  <th>Vib Y</th>
+                  <th>Vib Z</th>
+                  <th>Temp °C</th>
+                  <th>I_tot (A)</th>
+                  <th>I_mot (A)</th>
+                  <th>V_tot (V)</th>
+                  <th>V_mot (V)</th>
+                  <th>4S Cells (V)</th>
+                  <th>Health</th>
+                  <th>RUL h</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="logBody">
+                <tr><td colspan="13" class="cell-empty">Waiting for telemetry…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+<!-- ════════════ SECTION: PROGNOSTICS ════════════ -->
+      <section class="page-section" id="sec-prognostics">
+
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
+          <p style="font-size:.82rem;color:var(--faint);margin:0">
+            <i data-lucide="info"></i>
+            Degradation contributions computed via SHAP — updated every 10 s.
+          </p>
+          <div class="range-group" id="progRangeGroup">
+            <button class="range-btn" data-d="1">1 day</button>
+            <button class="range-btn is-active" data-d="7">7 days</button>
+            <button class="range-btn" data-d="30">30 days</button>
+          </div>
+        </div>
+
+        <div class="metrics mb-5">
+          <div class="metric" style="--m-accent: var(--ok)">
+            <div class="metric-label"><i data-lucide="shield"></i> Health Index</div>
+            <div class="metric-value mono" id="pHealth">—</div>
+            <div class="metric-foot" id="pHealthDelta">vs previous period</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--danger)">
+            <div class="metric-label"><i data-lucide="slash"></i> Anomalies</div>
+            <div class="metric-value mono" id="pAnomalies">—</div>
+            <div class="metric-foot" id="pAnomalyDelta">threshold crossings</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--info)">
+            <div class="metric-label"><i data-lucide="clock"></i> Est. RUL</div>
+            <div class="metric-value mono" id="pRul">—</div>
+            <div class="metric-foot">hours to maintenance</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--accent)">
+            <div class="metric-label"><i data-lucide="flame"></i> Degradation Rate</div>
+            <div class="metric-value mono" id="pDegRate">—</div>
+            <div class="metric-foot">% per hour</div>
+          </div>
+        </div>
+
+        <div class="grid-2 mb-5">
+          <!-- SHAP contributions -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="alert-triangle"></i> Top Degradation Contributors</span>
+            </div>
+            <div class="card-body" id="shapBody">
+              <div class="chart-empty">Computing SHAP values…</div>
+            </div>
+          </section>
+
+          <!-- Failure mode histogram by hour -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="clock"></i> Anomaly Pattern (24 h)</span>
+            </div>
+            <div class="card-body" id="hoursBody">
+              <div class="chart-empty">Loading…</div>
+            </div>
+          </section>
+        </div>
+
+        <!-- RUL trajectory projection -->
+        <section class="card mb-5">
+          <div class="card-head">
+            <span class="card-title"><i data-lucide="trending-up"></i> RUL Projection</span>
+            <span style="font-size:.72rem;color:var(--faint)">
+              <span style="color:var(--info)">&#9632;</span> Predicted &nbsp;
+              <span style="color:var(--border)">&#9632;</span> Confidence band
+            </span>
+          </div>
+          <div class="card-body">
+            <canvas id="rulProjectChart" height="160"></canvas>
+          </div>
+        </section>
+
+        <!-- Sensor scorecard table -->
+        <section class="card">
+          <div class="card-head">
+            <span class="card-title"><i data-lucide="cpu"></i> Sensor Scorecard</span>
+            <span style="font-size:.72rem;color:var(--faint)">Ranked by deviation from baseline</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data">
+              <thead>
+                <tr>
+                  <th>Sensor</th>
+                  <th style="text-align:center">Current</th>
+                  <th style="text-align:center">Baseline</th>
+                  <th>SHAP</th>
+                  <th style="text-align:right">Status</th>
+                </tr>
+              </thead>
+              <tbody id="sensorScoreBody">
+                <tr><td colspan="5" class="cell-empty">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <!-- ════════════ SECTION: ALERTS ════════════ -->
+      <section class="page-section" id="sec-alerts">
+
+        <!-- Active alerts -->
+        <section class="card mb-5">
+          <div class="card-head">
+            <span class="card-title"><i data-lucide="alert-circle"></i> Active Anomalies</span>
+            <span class="live-pill is-live" style="font-size:.65rem;padding:3px 9px">
+              <span class="live-dot"></span>Auto-refresh
+            </span>
+          </div>
+          <div class="card-body">
+            <div class="active-list" id="activeAlertList">
+              <div class="chart-empty">No active anomalies — system nominal.</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Alert history timeline -->
+        <section class="card">
+          <div class="card-head">
+            <span class="card-title"><i data-lucide="history"></i> Alert History</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="kind-group" id="alertKindGroup">
+                <button class="kind-btn is-active" data-k="all">All</button>
+                <button class="kind-btn" data-k="critical">Critical</button>
+                <button class="kind-btn" data-k="warning">Warning</button>
+              </div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="trail" id="alertTrail">
+              <div class="chart-empty">No alerts recorded.</div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <!-- ════════════ SECTION: WAVEFORMS ════════════ -->
+      <section class="page-section" id="sec-waveforms">
+
+        <div class="metrics mb-5">
+          <div class="metric" style="--m-accent: var(--accent)">
+            <div class="metric-label"><i data-lucide="activity"></i> Vib X RMS</div>
+            <div class="metric-value mono" id="wVibX">—</div>
+            <div class="metric-foot">Peak-to-peak</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--info)">
+            <div class="metric-label"><i data-lucide="activity"></i> Vib Y RMS</div>
+            <div class="metric-value mono" id="wVibY">—</div>
+            <div class="metric-foot">Peak-to-peak</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--ok)">
+            <div class="metric-label"><i data-lucide="activity"></i> Vib Z RMS</div>
+            <div class="metric-value mono" id="wVibZ">—</div>
+            <div class="metric-foot">Peak-to-peak</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--hazard)">
+            <div class="metric-label"><i data-lucide="zap"></i> Kurtosis</div>
+            <div class="metric-value mono" id="wKurt">—</div>
+            <div class="metric-foot">Impulsive shock indicator</div>
+          </div>
+        </div>
+
+        <div class="grid-3 mb-5">
+          <section class="card">
+            <div class="card-head"><span class="card-title"><i data-lucide="activity"></i> Vibration X</span></div>
+            <div class="card-body">
+              <div class="osc-wrap"><canvas id="oscX" height="120"></canvas></div>
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-head"><span class="card-title"><i data-lucide="activity"></i> Vibration Y</span></div>
+            <div class="card-body">
+              <div class="osc-wrap"><canvas id="oscY" height="120"></canvas></div>
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-head"><span class="card-title"><i data-lucide="activity"></i> Vibration Z</span></div>
+            <div class="card-body">
+              <div class="osc-wrap"><canvas id="oscZ" height="120"></canvas></div>
+            </div>
+          </section>
+        </div>
+
+        <div class="grid-2">
+          <section class="card">
+            <div class="card-head"><span class="card-title"><i data-lucide="thermometer"></i> Temperature</span></div>
+            <div class="card-body">
+              <div class="osc-wrap"><canvas id="oscTemp" height="120"></canvas></div>
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-head"><span class="card-title"><i data-lucide="zap"></i> Current Draw</span></div>
+            <div class="card-body">
+              <div class="osc-wrap"><canvas id="oscCurr" height="120"></canvas></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ════════════ SECTION: REPORTS ════════════ -->
+      <section class="page-section" id="sec-reports">
+
+        <div class="metrics mb-5">
+          <div class="metric" style="--m-accent: var(--info)">
+            <div class="metric-label"><i data-lucide="file-text"></i> Reports Generated</div>
+            <div class="metric-value mono">12</div>
+            <div class="metric-foot">This month</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--ok)">
+            <div class="metric-label"><i data-lucide="check"></i> Health Checks</div>
+            <div class="metric-value mono">847</div>
+            <div class="metric-foot">All-time</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--danger)">
+            <div class="metric-label"><i data-lucide="slash"></i> Anomaly Events</div>
+            <div class="metric-value mono" id="repAnomTotal">—</div>
+            <div class="metric-foot">Last 30 days</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--accent)">
+            <div class="metric-label"><i data-lucide="clock"></i> Uptime</div>
+            <div class="metric-value mono">99.2%</div>
+            <div class="metric-foot">Last 30 days</div>
+          </div>
+        </div>
+
+        <section class="card">
+          <div class="card-head">
+            <span class="card-title"><i data-lucide="file-text"></i> Report Archive</span>
+            <button class="btn btn-primary btn-sm" onclick="generateReport()">
+              <i data-lucide="plus"></i> Generate
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table class="data">
+              <thead>
+                <tr>
+                  <th>Report</th>
+                  <th>Period</th>
+                  <th>Generated</th>
+                  <th>Anomalies</th>
+                  <th>Avg Health</th>
+                  <th style="text-align:right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="reportsBody">
+                <!-- populated by JS -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <!-- ════════════ SECTION: CALIBRATION ════════════ -->
+      <section class="page-section" id="sec-calibration">
+
+        <div class="grid-2 mb-5">
+          <!-- Sensor thresholds -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="sliders-horizontal"></i> Sensor Thresholds</span>
+            </div>
+            <div class="card-body">
+              <p style="font-size:.82rem;color:var(--muted);margin:0 0 14px">
+                Adjust alarm thresholds for each sensor channel. Changes take effect immediately.
+              </p>
+              <div id="thresholdList">
+                <div class="req-item is-on" onclick="this.classList.toggle('is-on')">
+                  <input type="checkbox" checked>
+                  <div>
+                    <span class="req-name">Vibration X alarm at 2.5 g</span>
+                    <span class="req-note">Triggers critical alert above this RMS threshold</span>
+                  </div>
+                </div>
+                <div class="req-item is-on" onclick="this.classList.toggle('is-on')">
+                  <input type="checkbox" checked>
+                  <div>
+                    <span class="req-name">Temperature alarm at 85 °C</span>
+                    <span class="req-note">Motor thermal protection threshold</span>
+                  </div>
+                </div>
+                <div class="req-item is-on" onclick="this.classList.toggle('is-on')">
+                  <input type="checkbox" checked>
+                  <div>
+                    <span class="req-name">Current alarm at 4.5 A</span>
+                    <span class="req-note">Winding insulation degradation indicator</span>
+                  </div>
+                </div>
+                <div class="req-item" onclick="this.classList.toggle('is-on')">
+                  <input type="checkbox">
+                  <div>
+                    <span class="req-name">Kurtosis alarm at 5.0</span>
+                    <span class="req-note">Impulsive bearing fault detection</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Model confidence -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="cpu"></i> Model Sensitivity</span>
+            </div>
+            <div class="card-body">
+              <p style="font-size:.82rem;color:var(--muted);margin:0 0 18px">
+                Adjust how aggressively the prognostics model flags anomalies. Higher = more sensitive.
+              </p>
+              <label class="field-label">Anomaly Sensitivity</label>
+              <div class="slider-row">
+                <input type="range" id="sensRange" min="10" max="90" step="5" value="50" oninput="document.getElementById('sensVal').textContent=this.value+'%'">
+                <span class="slider-val" id="sensVal">50%</span>
+              </div>
+              <div class="scale"><span>10% — strict</span><span>90% — aggressive</span></div>
+
+              <div style="margin-top:20px">
+                <label class="field-label">Health Decay Window (days)</label>
+                <div class="slider-row">
+                  <input type="range" id="decayRange" min="3" max="30" step="1" value="7" oninput="document.getElementById('decayVal').textContent=this.value+'d'">
+                  <span class="slider-val" id="decayVal">7d</span>
+                </div>
+                <div class="scale"><span>3 days — responsive</span><span>30 days — stable</span></div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="save-bar">
+          <span class="save-note" id="calibSaveNote">No unsaved changes.</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline btn-sm" onclick="resetCalib()"><i data-lucide="rotate-ccw"></i> Reset to defaults</button>
+            <button class="btn btn-primary btn-sm" onclick="saveCalib()"><i data-lucide="check"></i> Save calibration</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════ SECTION: AUDIT LOG ════════════ -->
+      <section class="page-section" id="sec-audit">
+
+        <section class="card">
+          <div class="card-head">
+            <span class="card-title"><i data-lucide="scroll"></i> Full Telemetry Historian</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:.72rem;color:var(--faint)" id="auditCount"></span>
+              <button class="btn btn-outline btn-sm" onclick="exportCSV()"><i data-lucide="download"></i> Download CSV</button>
+            </div>
+          </div>
+          <div class="table-wrap" style="max-height:520px;overflow-y:auto;">
+            <table class="data">
+              <thead style="position:sticky;top:0;z-index:1;">
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Vib X</th>
+                  <th>Vib Y</th>
+                  <th>Vib Z</th>
+                  <th>Temp</th>
+                  <th>Current</th>
+                  <th>Health</th>
+                  <th>RUL</th>
+                  <th>Event</th>
+                </tr>
+              </thead>
+              <tbody id="auditBody">
+                <tr><td colspan="9" class="cell-empty">No records yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <!-- ════════════ SECTION: SYSTEM INFO ════════════ -->
+      <section class="page-section" id="sec-sysinfo">
+
+        <div class="metrics mb-5">
+          <div class="metric" style="--m-accent: var(--ok)">
+            <div class="metric-label"><i data-lucide="server"></i> API Status</div>
+            <div class="metric-value mono" style="font-size:1.4rem;color:var(--ok)">Online</div>
+            <div class="metric-foot">FastAPI v0.104.1</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--info)">
+            <div class="metric-label"><i data-lucide="database"></i> Database</div>
+            <div class="metric-value mono" style="font-size:1.4rem">SQLite</div>
+            <div class="metric-foot" id="sysDbSize">—</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--accent)">
+            <div class="metric-label"><i data-lucide="cpu"></i> ML Model</div>
+            <div class="metric-value mono" style="font-size:1.4rem">Loaded</div>
+            <div class="metric-foot">Gradient Boost + LSTM</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--hazard)">
+            <div class="metric-label"><i data-lucide="hard-drive"></i> Memory</div>
+            <div class="metric-value mono" id="sysMemory" style="font-size:1.4rem">—</div>
+            <div class="metric-foot">System RAM used</div>
+          </div>
+        </div>
+
+        <div class="grid-2 mb-5">
+          <section class="card">
+            <div class="card-head"><span class="card-title"><i data-lucide="cpu"></i> Hardware Specs</span></div>
+            <div class="card-body">
+              <table class="data">
+                <tbody>
+                  <tr><td style="color:var(--faint);width:40%">Motor</td><td style="font-weight:600">RS-380 DC Motor</td></tr>
+                  <tr><td style="color:var(--faint)">Rated Voltage</td><td>7.2 V</td></tr>
+                  <tr><td style="color:var(--faint)">Rated Current</td><td>3.8 A</td></tr>
+                  <tr><td style="color:var(--faint)">RPM (nominal)</td><td>18,000 rpm</td></tr>
+                  <tr><td style="color:var(--faint)">Torque</td><td>42 mNm</td></tr>
+                  <tr><td style="color:var(--faint)">IMU</td><td>MPU-6050 (6-DOF)</td></tr>
+                  <tr><td style="color:var(--faint)">Sample Rate</td><td>2 Hz live / 100 Hz burst</td></tr>
+                  <tr><td style="color:var(--faint)">Temp Sensor</td><td>NTC 10kΩ thermistor</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-head"><span class="card-title"><i data-lucide="layers"></i> Software Stack</span></div>
+            <div class="card-body">
+              <table class="data">
+                <tbody>
+                  <tr><td style="color:var(--faint);width:40%">Backend</td><td>FastAPI + Uvicorn</td></tr>
+                  <tr><td style="color:var(--faint)">ML Framework</td><td>scikit-learn + TensorFlow</td></tr>
+                  <tr><td style="color:var(--faint)">Data Layer</td><td>SQLite via SQLAlchemy</td></tr>
+                  <tr><td style="color:var(--faint)">Frontend</td><td>Vanilla JS + Chart.js 4</td></tr>
+                  <tr><td style="color:var(--faint)">Design System</td><td>SafetyFirst Console CSS</td></tr>
+                  <tr><td style="color:var(--faint)">Dashboard</td><td>Streamlit 1.28 (embed)</td></tr>
+                  <tr><td style="color:var(--faint)">Python</td><td>3.11.x</td></tr>
+                  <tr><td style="color:var(--faint)">License</td><td>MIT</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <section class="card">
+          <div class="card-head"><span class="card-title"><i data-lucide="network"></i> Architecture</span></div>
+          <div class="card-body">
+            <p style="font-size:.84rem;color:var(--muted);line-height:1.7">
+              The RS-380 Motor Prognostics system acquires six-axis vibration (MPU-6050), temperature,
+              and current telemetry from a physical motor rig. A FastAPI service ingests readings into
+              SQLite, then feeds a Gradient Boosting + LSTM ensemble that outputs a continuous
+              <strong>Health Index</strong> (0–100) and <strong>Remaining Useful Life</strong>
+              estimate with 90% confidence bounds. SHAP attribution identifies the dominant
+              degradation mode per reading. Alerts fire when health drops below configurable
+              thresholds. This dashboard is served directly by Python's HTTP server and optionally
+              embedded in Streamlit.
+            </p>
+          </div>
+        </section>
+      </section>
+
+    </div><!-- /content -->
+  </main>
+</div><!-- /app -->
+
+<!-- ═══════════════════ SCRIPTS ═══════════════════ -->
+<script>
+// ─────────── NAVIGATION ───────────
+const PAGES = {
+  overview:    { title: 'SCADA Overview',     sub: 'Real-time telemetry, health index, and remaining useful life' },
+  prognostics: { title: 'Prognostics',        sub: 'Degradation analysis, SHAP attribution, and RUL projection' },
+  alerts:      { title: 'Anomaly Alerts',     sub: 'Active fault conditions and historical alert timeline' },
+  waveforms:   { title: 'Waveform Captures',  sub: 'Oscilloscope-style sensor traces at full sample rate' },
+  reports:     { title: 'Reports',            sub: 'Generated health reports and export archive' },
+  calibration: { title: 'Calibration',        sub: 'Sensor thresholds, model sensitivity, and alarm policy' },
+  audit:       { title: 'Audit Log',          sub: 'Complete telemetry historian — all readings since session start' },
+  sysinfo:     { title: 'System Info',        sub: 'Hardware specifications, software stack, and architecture overview' },
+};
+
+let currentPage = 'overview';
+const _inited = {}; // track which section charts have been initialized
+
+function navigate(id) {
+  if (currentPage === id) return;
+  const outEl = document.getElementById('sec-' + currentPage);
+  const inEl  = document.getElementById('sec-' + id);
+  if (!inEl) return;
+
+  // Update nav state
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('is-active'));
+  document.getElementById('nav-' + id)?.classList.add('is-active');
+
+  // Lazy-initialize charts that live in hidden sections
+  if (id === 'waveforms'   && !_inited.osc)  { initOscCharts(); _inited.osc = true; }
+  if (id === 'prognostics' && !_inited.rul)  { initRulProjChart(); _inited.rul = true; }
+
+  // ── GSAP crossfade ───────────────────────────────────────────────────────
+  const tl = gsap.timeline({ defaults: { ease: 'power2.out' } });
+
+  if (outEl && outEl.classList.contains('is-active')) {
+    tl.to(outEl, { opacity: 0, y: -6, duration: 0.15, onComplete: () => {
+      outEl.classList.remove('is-active');
+      outEl.style.opacity = '';
+      outEl.style.transform = '';
+    }});
+  }
+
+  tl.call(() => {
+    inEl.classList.add('is-active');
+    gsap.fromTo(inEl, { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.28, ease: 'power2.out' });
+  });
+
+  // Animate topbar text change
+  const titleEl = document.getElementById('topbarTitle');
+  const subEl   = document.getElementById('topbarSub');
+  const p = PAGES[id] || {};
+  gsap.to([titleEl, subEl], { opacity: 0, y: -4, duration: 0.1, onComplete: () => {
+    titleEl.textContent = p.title || id;
+    subEl.textContent   = p.sub   || '';
+    gsap.to([titleEl, subEl], { opacity: 1, y: 0, duration: 0.2 });
+  }});
+
+  currentPage = id;
+
+  if (id === 'prognostics')  refreshPrognostics();
+  if (id === 'reports')      buildReportsTable();
+  if (id === 'audit')        buildAuditTable();
+  if (id === 'sysinfo')      refreshSysInfo();
+}
+
+// ─────────── SIDEBAR COLLAPSE (PPE-faithful) ───────────
+const app      = document.getElementById('appRoot');
+const toggle   = document.getElementById('menuToggle');
+const mToggle  = document.getElementById('menuToggleMobile');
+const sidebar  = document.getElementById('appSidebar');
+const wide     = () => window.matchMedia('(min-width: 1025px)').matches;
+let scrim = null;
+
+const removeScrim = () => { if (scrim) { scrim.remove(); scrim = null; } };
+const addScrim = () => {
+  if (scrim) return;
+  scrim = document.createElement('div');
+  scrim.className = 'nav-scrim';
+  scrim.addEventListener('click', () => setOpen(false));
+  document.body.appendChild(scrim);
+};
+
+// Update ARIA + collapse button icon direction
+function syncUI(open) {
+  toggle.setAttribute('aria-expanded', String(open));
+  mToggle.setAttribute('aria-expanded', String(!open));
+  const ic = document.getElementById('menuToggleIcon');
+  if (ic) {
+    // open (sidebar visible) → show left-chevrons «  (click to collapse)
+    // closed                 → show right-chevrons » (click to expand)
+    ic.innerHTML = open
+      ? '<path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/>'
+      : '<path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/>';
+  }
+}
+
+// Single entry point — works for both desktop rail and mobile drawer
+function setOpen(open) {
+  if (wide()) {
+    // Desktop: toggle the icon-rail collapse class on .app
+    app.classList.toggle('is-collapsed', !open);
+    removeScrim(); // scrim never needed on desktop
+  } else {
+    // Mobile: slide sidebar in/out via .is-open on aside
+    sidebar.classList.toggle('is-open', open);
+    open ? addScrim() : removeScrim();
+  }
+  syncUI(open);
+}
+
+function currentlyOpen() {
+  return wide()
+    ? !app.classList.contains('is-collapsed')
+    : sidebar.classList.contains('is-open');
+}
+
+// ── Initial state ──
+// Desktop starts OPEN (sidebar full-width, icon shows «)
+// Mobile starts CLOSED (sidebar off-canvas, hamburger shows »)
+if (!wide()) {
+  // mobile: sidebar hidden off-canvas — no class needed on .app
+  syncUI(false);
+} else {
+  // desktop: sidebar open — ensure no stale is-collapsed
+  app.classList.remove('is-collapsed');
+  syncUI(true);
+}
+
+// ── Button listeners ──
+toggle.addEventListener('click', () => setOpen(!currentlyOpen()));
+mToggle.addEventListener('click', () => setOpen(!currentlyOpen()));
+
+// ── Breakpoint change — reset when resizing across 1025px ──
+window.matchMedia('(min-width: 1025px)').addEventListener('change', (mq) => {
+  sidebar.classList.remove('is-open');
+  removeScrim();
+  if (mq.matches) {
+    // Switched to desktop → open
+    app.classList.remove('is-collapsed');
+    syncUI(true);
+  } else {
+    // Switched to mobile → closed
+    syncUI(false);
+  }
+});
+
+// ── Mobile: close drawer when a nav link is tapped ──
+sidebar.querySelectorAll('a').forEach(link => {
+  link.addEventListener('click', () => {
+    if (!wide()) { setOpen(false); }
+  });
+});
+
+// ── ESC closes mobile drawer ──
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !wide() && currentlyOpen()) setOpen(false);
+});
+
+// ─────────── SIMULATION ENGINE ───────────
+const SENSORS = ['vibX', 'vibY', 'vibZ', 'temp', 'current', 'kurtosis'];
+const BASELINE = { vibX: 0.85, vibY: 0.72, vibZ: 0.64, temp: 42.0, current: 2.3, kurtosis: 3.0 };
+const UNITS    = { vibX: 'g', vibY: 'g', vibZ: 'g', temp: '°C', current: 'A', kurtosis: 'β₂' };
+const LABELS   = { vibX: 'Vib X', vibY: 'Vib Y', vibZ: 'Vib Z', temp: 'Temp', current: 'Current', kurtosis: 'Kurtosis' };
+const COLORS   = { vibX: 'var(--accent)', vibY: 'var(--info)', vibZ: 'var(--ok)', temp: 'var(--hazard)', current: 'var(--danger)', kurtosis: '#7c3aed' };
+const S_COLORS = { vibX: '#b4441f', vibY: '#2c5282', vibZ: '#2f6b46', temp: '#92400e', current: '#b3271e', kurtosis: '#7c3aed' };
+
+let simAge  = 0;   // simulated operating hours
+let healthy = true;
+let streaming = true;
+let telemetryLog = [];  // [{ts, vals, health, rul, event}]
+let alertHistory = [];
+
+// Degradation model
+function degradationFactor() {
+  // Gradual S-curve degradation
+  const t = simAge;
+  return Math.min(1, Math.pow(t / 2000, 1.6));
+}
+
+function simulateReading() {
+  simAge += 0.0006; // ~2 readings/sec simulated time
+  const deg = degradationFactor();
+  const noise = () => (Math.random() - 0.5) * 0.06;
+
+  const motorCurr = +(BASELINE.current * (1 + deg * 0.6) + noise() * 0.1).toFixed(3);
+  const auxCurr = +(0.52 + (Math.random() - 0.5) * 0.02).toFixed(3);
+  const totalCurr = +(motorCurr + auxCurr).toFixed(3);
+
+  const c1 = +(3.715 - deg * 0.05 + noise() * 0.02).toFixed(3);
+  const c2 = +(3.702 - deg * 0.06 + noise() * 0.02).toFixed(3);
+  const c3 = +(3.710 - deg * 0.04 + noise() * 0.02).toFixed(3);
+  const c4 = +(3.693 - deg * 0.07 + noise() * 0.02).toFixed(3);
+  const totalVolt = +(c1 + c2 + c3 + c4).toFixed(2);
+  const motorVolt = +(12.04 - deg * 0.4 + noise() * 0.05).toFixed(2);
+  const cellDeltaMv = Math.round((Math.max(c1, c2, c3, c4) - Math.min(c1, c2, c3, c4)) * 1000);
+
+  const vals = {
+    vibX: +(BASELINE.vibX * (1 + deg * 1.8) + noise() + 0.12 * Math.sin(Date.now() / 800)).toFixed(3),
+    vibY: +(BASELINE.vibY * (1 + deg * 1.4) + noise() + 0.08 * Math.sin(Date.now() / 640)).toFixed(3),
+    vibZ: +(BASELINE.vibZ * (1 + deg * 1.1) + noise() + 0.06 * Math.cos(Date.now() / 920)).toFixed(3),
+    temp: +(BASELINE.temp  + deg * 28 + noise() * 1.5).toFixed(1),
+    current: motorCurr,
+    motorCurrent: motorCurr,
+    auxCurrent: auxCurr,
+    totalCurrent: totalCurr,
+    cell1: c1,
+    cell2: c2,
+    cell3: c3,
+    cell4: c4,
+    totalVoltage: totalVolt,
+    motorVoltage: motorVolt,
+    cellDeltaMv: cellDeltaMv,
+    kurtosis: +(3 + deg * 3.5 + Math.random() * 0.4).toFixed(2),
+  };
+  const health = Math.max(0, Math.min(100, +(100 - deg * 88 - Math.random() * 2).toFixed(1)));
+  const rulHours = +(Math.max(0, (1 - deg) * 3200 + Math.random() * 40 - 20)).toFixed(0);
+  const rulLo = +(rulHours * 0.88).toFixed(0);
+  const rulHi = +(rulHours * 1.12).toFixed(0);
+  const rms = +(Math.sqrt((vals.vibX**2 + vals.vibY**2 + vals.vibZ**2) / 3) - Math.sqrt(BASELINE.vibX**2 + BASELINE.vibY**2 + BASELINE.vibZ**2) / Math.sqrt(3)).toFixed(4);
+  const kurtosis = +(3 + deg * 3.5 + Math.random() * 0.5).toFixed(2);
+  let status = 'NORMAL', severity = null, event = null;
+  if (health < 40) { status = 'CRITICAL'; severity = 'critical'; event = 'Health below 40%'; }
+  else if (health < 70) { status = 'WARNING'; severity = 'warning'; event = 'Health below 70%'; }
+  return { ts: new Date(), vals, health, rulHours, rulLo, rulHi, rms, kurtosis, status, severity, event };
+}
+
+// ─────────── CHART.JS SETUP ───────────
+const MAX_TRAJ = 120;
+let trajData = { labels: [], health: [], rul_norm: [] };
+
+const trajCtx = document.getElementById('trajChart').getContext('2d');
+const trajChart = new Chart(trajCtx, {
+  type: 'line',
+  data: {
+    labels: trajData.labels,
+    datasets: [
+      { label: 'Health Index', data: trajData.health, borderColor: '#2f6b46', backgroundColor: 'rgba(47,107,70,.08)', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true },
+      { label: 'RUL (norm)', data: trajData.rul_norm, borderColor: '#b4441f', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: false, borderDash: [5,3] },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    animation: { duration: 0 },
+    scales: {
+      x: { display: true, ticks: { maxTicksLimit: 8, font: { size: 10 }, color: '#8b9099' }, grid: { color: 'rgba(0,0,0,.04)' } },
+      y: { min: 0, max: 100, ticks: { font: { size: 10 }, color: '#8b9099' }, grid: { color: 'rgba(0,0,0,.04)' } }
+    },
+    plugins: { legend: { display: false } },
+    interaction: { mode: 'index', intersect: false },
+  }
+});
+
+// ─────────── OSCILLOSCOPE CHARTS (lazy — only when Waveforms tab is first opened) ───────────
+let oscX, oscY, oscZ, oscTemp, oscCurr;
+
+// ─────────── OSCILLOSCOPE CHARTS (lazy — only when Waveforms tab is first opened) ───────────
+
+function makeOsc(canvasId, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const W = 256; // fewer points = faster render, still smooth
+  return new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: Array(W).fill(''),
+      datasets: [{
+        data: Array(W).fill(0),
+        borderColor: color,
+        borderWidth: 1.5,
+        tension: 0.2,
+        pointRadius: 0,
+        fill: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 0 },
+      scales: {
+        x: { display: false },
+        y: {
+          display: true,
+          ticks: { font: { size: 9 }, color: '#8b9099', maxTicksLimit: 4 },
+          grid: { color: 'rgba(255,255,255,.1)' },
+          border: { color: 'rgba(255,255,255,.15)' },
+        },
+      },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    },
+  });
+}
+
+function initOscCharts() {
+  oscX    = makeOsc('oscX',    '#b4441f');
+  oscY    = makeOsc('oscY',    '#2c5282');
+  oscZ    = makeOsc('oscZ',    '#2f6b46');
+  oscTemp = makeOsc('oscTemp', '#92400e');
+  oscCurr = makeOsc('oscCurr', '#b3271e');
+}
+
+// ─────────── RUL PROJECTION CHART (lazy) ───────────
+let rulProjChart = null;
+
+function initRulProjChart() {
+  const canvas = document.getElementById('rulProjectChart');
+  if (!canvas) return;
+  rulProjChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Predicted RUL',
+          data: [],
+          borderColor: '#2c5282',
+          borderWidth: 2,
+          tension: 0.4,
+          pointRadius: 0,
+          fill: false,
+        },
+        {
+          label: 'CI Upper',
+          data: [],
+          borderColor: 'rgba(44,82,130,.3)',
+          backgroundColor: 'rgba(44,82,130,.08)',
+          borderWidth: 1,
+          tension: 0.4,
+          pointRadius: 0,
+          fill: false,
+        },
+        {
+          label: 'CI Lower',
+          data: [],
+          borderColor: 'rgba(44,82,130,.3)',
+          borderWidth: 1,
+          tension: 0.4,
+          pointRadius: 0,
+          fill: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 0 },
+      scales: {
+        x: { ticks: { maxTicksLimit: 8, font: { size: 10 }, color: '#8b9099' }, grid: { color: 'rgba(0,0,0,.04)' } },
+        y: { ticks: { font: { size: 10 }, color: '#8b9099' }, grid: { color: 'rgba(0,0,0,.04)' } },
+      },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    },
+  });
+}
+
+// ─────────── SENSOR GRID INIT ───────────
+const sensorGrid = document.getElementById('sensorGrid');
+SENSORS.forEach(k => {
+  const tile = document.createElement('div');
+  tile.className = 'sensor-tile';
+  tile.style.setProperty('--s-color', S_COLORS[k]);
+  tile.innerHTML = `
+    <div class="sensor-tile-label">${LABELS[k]}</div>
+    <div class="sensor-tile-value mono" id="st-${k}">—</div>
+    <div class="sensor-tile-unit">${UNITS[k]}</div>
+  `;
+  sensorGrid.appendChild(tile);
+});
+if (typeof lucide !== 'undefined') lucide.createIcons({ nodes: [...sensorGrid.querySelectorAll('[data-lucide]')], });
+
+// ─────────── UPDATE UI ───────────
+function fmt(v, d=3) { return (+v).toFixed(d); }
+function timeStr(d) { return d.toLocaleTimeString('en-GB'); }
+
+function updateKPIs(r) {
+  // Overview KPIs: match Prognostics clean numbers & phrasing exactly
+  document.getElementById('mHealthIdx').textContent = fmt(r.health, 1);
+  document.getElementById('mRul').textContent = r.rulHours + ' h';
+  document.getElementById('mRms').textContent = (r.rms >= 0 ? '+' : '') + fmt(r.rms, 3) + ' g';
+  const topVal = r.vals.vibX > r.vals.vibY ? r.vals.vibX : r.vals.vibY;
+  const topAxis = r.vals.vibX > r.vals.vibY ? 'Vib X' : 'Vib Y';
+  document.getElementById('mTopContrib').textContent = fmt(topVal, 3) + ' g';
+  
+  document.getElementById('mHealthFoot').textContent = 'Healthy — low degradation';
+  document.getElementById('mRulFoot').textContent = 'hours to maintenance';
+  const rmsEl = document.getElementById('mRmsFoot');
+  if (rmsEl) rmsEl.textContent = 'vibration delta baseline';
+  document.getElementById('mTopContribFoot').textContent = `primary driver: ${topAxis}`;
+
+  // Status badge
+  const badge = document.getElementById('statusBadge');
+  const text  = document.getElementById('statusText');
+  if (badge) badge.className = 'status-pill ' + (r.health < 40 ? 'critical' : r.health < 70 ? 'warning' : 'good');
+  if (text) text.textContent = r.status;
+
+  // New Condition Assessment elements
+  const scoreDisplay = document.getElementById('healthScoreDisplay');
+  if (scoreDisplay) {
+    scoreDisplay.textContent = fmt(r.health, 1) + '%';
+    scoreDisplay.style.color = r.health > 70 ? 'var(--ok)' : r.health > 40 ? 'var(--hazard)' : 'var(--danger)';
+  }
+  const badgeDisplay = document.getElementById('healthBadgeDisplay');
+  if (badgeDisplay) {
+    badgeDisplay.className = 'badge ' + (r.health > 70 ? 'badge-ok' : r.health > 40 ? 'badge-hazard' : 'badge-danger');
+    badgeDisplay.textContent = r.status;
+  }
+  const barFill = document.getElementById('healthBarFill');
+  if (barFill) {
+    barFill.style.width = r.health + '%';
+    barFill.style.background = r.health > 70
+      ? 'linear-gradient(90deg, #2f6b46, #4ade80)'
+      : r.health > 40
+      ? 'linear-gradient(90deg, #92400e, #f59e0b)'
+      : 'linear-gradient(90deg, #b3271e, #ef4444)';
+  }
+
+  // RUL band
+  const pct = Math.min(100, (r.rulHi - r.rulLo) / 600 * 100);
+  const bandFill = document.getElementById('rulBandFill');
+  if (bandFill) bandFill.style.width = pct + '%';
+  const bandText = document.getElementById('rulBandText');
+  if (bandText) bandText.textContent = r.rulLo + '–' + r.rulHi + ' h';
+  const rulLoEl = document.getElementById('rulLo');
+  if (rulLoEl) rulLoEl.textContent = 'CI low: ' + r.rulLo + ' h';
+  const rulHiEl = document.getElementById('rulHi');
+  if (rulHiEl) rulHiEl.textContent = 'CI high: ' + r.rulHi + ' h';
+
+  // Maint badge
+  const mb = document.getElementById('maintBadge');
+  if (mb) {
+    if (r.rulHours < 200) { mb.className = 'badge badge-danger'; mb.textContent = 'Urgent — <200 h'; }
+    else if (r.rulHours < 600) { mb.className = 'badge badge-hazard'; mb.textContent = 'Plan — <600 h'; }
+    else { mb.className = 'badge badge-ok'; mb.textContent = 'OK — ' + r.rulHours + ' h'; }
+  }
+
+  // Sensor tiles (all 6 tiles!)
+  SENSORS.forEach(k => {
+    const el = document.getElementById('st-' + k);
+    if (el) el.textContent = fmt(r.vals[k], k === 'temp' ? 1 : k === 'kurtosis' ? 2 : 3);
+  });
+
+  // Motor info
+  const mTemp = document.getElementById('motorTemp');
+  if (mTemp) mTemp.textContent = fmt(r.vals.temp, 1) + ' °C';
+  const opH = document.getElementById('opHours');
+  if (opH) opH.textContent = fmt(simAge * 100, 1) + ' h';
+
+  // DC Power Distribution & 4S Battery Pack Telemetry
+  const pTotCurr = document.getElementById('pwrTotCurr');
+  if (pTotCurr) pTotCurr.textContent = fmt(r.vals.totalCurrent, 3) + ' A';
+  const pMotCurr = document.getElementById('pwrMotCurr');
+  if (pMotCurr) pMotCurr.textContent = fmt(r.vals.motorCurrent, 3) + ' A';
+  const pAuxSub = document.getElementById('pwrAuxSub');
+  if (pAuxSub) pAuxSub.textContent = 'Aux MCU: ' + fmt(r.vals.auxCurrent, 3) + ' A';
+  const currRatio = Math.round((r.vals.motorCurrent / r.vals.totalCurrent) * 100);
+  const currBadge = document.getElementById('currSplitBadge');
+  if (currBadge) currBadge.textContent = currRatio + '% Motor';
+  const currBar = document.getElementById('pwrCurrBarFill');
+  if (currBar) currBar.style.width = currRatio + '%';
+
+  const pTotVolt = document.getElementById('pwrTotVolt');
+  if (pTotVolt) pTotVolt.textContent = fmt(r.vals.totalVoltage, 2) + ' V';
+  const pMotVolt = document.getElementById('pwrMotVolt');
+  if (pMotVolt) pMotVolt.textContent = fmt(r.vals.motorVoltage, 2) + ' V';
+  const vDrop = (r.vals.totalVoltage - r.vals.motorVoltage).toFixed(2);
+  const pVoltDrop = document.getElementById('pwrVoltDrop');
+  if (pVoltDrop) pVoltDrop.textContent = 'Δ ' + vDrop + ' V Drop';
+  const vEff = ((r.vals.motorVoltage / r.vals.totalVoltage) * 100).toFixed(1);
+  const pVoltEff = document.getElementById('pwrVoltEff');
+  if (pVoltEff) pVoltEff.textContent = vEff + '% Transfer';
+  const voltBar = document.getElementById('pwrVoltBarFill');
+  if (voltBar) voltBar.style.width = Math.min(100, Math.round((r.vals.motorVoltage / r.vals.totalVoltage) * 100)) + '%';
+
+  const pc1 = document.getElementById('pwrCell1'); if (pc1) pc1.textContent = fmt(r.vals.cell1, 3) + ' V';
+  const pc2 = document.getElementById('pwrCell2'); if (pc2) pc2.textContent = fmt(r.vals.cell2, 3) + ' V';
+  const pc3 = document.getElementById('pwrCell3'); if (pc3) pc3.textContent = fmt(r.vals.cell3, 3) + ' V';
+  const pc4 = document.getElementById('pwrCell4'); if (pc4) pc4.textContent = fmt(r.vals.cell4, 3) + ' V';
+
+  const cellPct = (v) => Math.min(100, Math.max(0, Math.round(((v - 3.0) / 1.2) * 100)));
+  const pb1 = document.getElementById('pwrCellBar1'); if (pb1) pb1.style.width = cellPct(r.vals.cell1) + '%';
+  const pb2 = document.getElementById('pwrCellBar2'); if (pb2) pb2.style.width = cellPct(r.vals.cell2) + '%';
+  const pb3 = document.getElementById('pwrCellBar3'); if (pb3) pb3.style.width = cellPct(r.vals.cell3) + '%';
+  const pb4 = document.getElementById('pwrCellBar4'); if (pb4) pb4.style.width = cellPct(r.vals.cell4) + '%';
+
+  const pDelta = document.getElementById('pwrCellDelta');
+  if (pDelta) pDelta.textContent = 'Imbalance: ' + r.vals.cellDeltaMv + ' mV';
+  const pCellBadge = document.getElementById('pwrCellBadge');
+  if (pCellBadge) {
+    pCellBadge.className = 'badge ' + (r.vals.cellDeltaMv < 50 ? 'badge-ok' : 'badge-hazard');
+    pCellBadge.textContent = (r.vals.cellDeltaMv < 50 ? 'Balanced' : 'Imbalance') + ' • Δ ' + r.vals.cellDeltaMv + ' mV';
+  }
+}
+
+function updateTrajectory(r) {
+  const label = timeStr(r.ts);
+  trajData.labels.push(label);
+  trajData.health.push(r.health);
+  trajData.rul_norm.push(Math.min(100, r.rulHours / 32));
+  if (trajData.labels.length > MAX_TRAJ) {
+    trajData.labels.shift(); trajData.health.shift(); trajData.rul_norm.shift();
+  }
+  trajChart.update();
+}
+
+// Oscilloscope rolling buffer
+const OSC_LEN = 256;
+const oscBufs = { vibX: [], vibY: [], vibZ: [], temp: [], current: [] };
+function updateOsc(r) {
+  const push = (buf, v) => { buf.push(v); if (buf.length > OSC_LEN) buf.shift(); };
+  push(oscBufs.vibX,    r.vals.vibX);
+  push(oscBufs.vibY,    r.vals.vibY);
+  push(oscBufs.vibZ,    r.vals.vibZ);
+  push(oscBufs.temp,    r.vals.temp);
+  push(oscBufs.current, r.vals.current);
+
+  const elWvibX = document.getElementById('wVibX');
+  if (elWvibX) elWvibX.textContent = fmt(r.vals.vibX, 3) + ' g';
+  const elWvibY = document.getElementById('wVibY');
+  if (elWvibY) elWvibY.textContent = fmt(r.vals.vibY, 3) + ' g';
+  const elWvibZ = document.getElementById('wVibZ');
+  if (elWvibZ) elWvibZ.textContent = fmt(r.vals.vibZ, 3) + ' g';
+  const elWkurt = document.getElementById('wKurt');
+  if (elWkurt) elWkurt.textContent = fmt(r.kurtosis, 2) + ' β₂';
+
+  // Only update if charts have been initialized (waveforms tab visited)
+  if (oscX) { oscX.data.datasets[0].data = [...oscBufs.vibX]; oscX.update(); }
+  if (oscY) { oscY.data.datasets[0].data = [...oscBufs.vibY]; oscY.update(); }
+  if (oscZ) { oscZ.data.datasets[0].data = [...oscBufs.vibZ]; oscZ.update(); }
+  if (oscTemp) { oscTemp.data.datasets[0].data = [...oscBufs.temp]; oscTemp.update(); }
+  if (oscCurr) { oscCurr.data.datasets[0].data = [...oscBufs.current]; oscCurr.update(); }
+}
+
+// Telemetry log table — clean capped feed of latest 10 snapshots
+const MAX_LOG_ROWS = 10;
+let logTickDivider = 0;
+function updateLogTable(r) {
+  telemetryLog.unshift(r);
+  if (telemetryLog.length > 500) telemetryLog.length = 500;
+
+  // Overview table only samples every 4 ticks (2 seconds) to stay readable and steady
+  logTickDivider++;
+  if (logTickDivider % 4 !== 0 && telemetryLog.length > 10) return;
+
+  const body = document.getElementById('logBody');
+  if (!body) return;
+
+  const badge = r.health > 70
+    ? `<span class="badge badge-ok">Normal</span>`
+    : r.health > 40
+    ? `<span class="badge badge-hazard">Warning</span>`
+    : `<span class="badge badge-danger">Critical</span>`;
+
+  const healthColor = r.health > 70 ? 'var(--ok)' : r.health > 40 ? 'var(--hazard)' : 'var(--danger)';
+
+  const cellSummary = `${fmt(r.vals.cell1,2)}|${fmt(r.vals.cell2,2)}|${fmt(r.vals.cell3,2)}|${fmt(r.vals.cell4,2)}`;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td style="white-space:nowrap;color:var(--muted);font-size:.8rem">${timeStr(r.ts)}</td>
+    <td class="mono">${fmt(r.vals.vibX,3)}</td>
+    <td class="mono">${fmt(r.vals.vibY,3)}</td>
+    <td class="mono">${fmt(r.vals.vibZ,3)}</td>
+    <td class="mono">${fmt(r.vals.temp,1)}</td>
+    <td class="mono" style="font-weight:600">${fmt(r.vals.totalCurrent,3)}</td>
+    <td class="mono" style="color:var(--accent);font-weight:600">${fmt(r.vals.motorCurrent,3)}</td>
+    <td class="mono">${fmt(r.vals.totalVoltage,2)}</td>
+    <td class="mono" style="color:var(--info);font-weight:600">${fmt(r.vals.motorVoltage,2)}</td>
+    <td class="mono" style="font-size:.72rem">${cellSummary}</td>
+    <td class="mono" style="color:${healthColor};font-weight:600">${fmt(r.health,1)}%</td>
+    <td class="mono">${r.rulHours}</td>
+    <td>${badge}</td>`;
+
+  // Prepend at top
+  body.insertBefore(tr, body.firstChild);
+
+  // Keep strictly at MAX_LOG_ROWS (10)
+  while (body.rows.length > MAX_LOG_ROWS) {
+    body.deleteRow(body.rows.length - 1);
+  }
+
+  const countEl = document.getElementById('logCount');
+  if (countEl) countEl.textContent = `${body.rows.length} latest records`;
+}
+
+// Alerts
+function updateAlerts(r) {
+  if (r.severity && alertHistory.length && alertHistory[0].severity === r.severity) return; // debounce same severity
+  if (r.severity) {
+    alertHistory.unshift({ ts: r.ts, severity: r.severity, msg: r.event, health: r.health });
+    if (alertHistory.length > 100) alertHistory.length = 100;
+    renderActiveAlerts();
+    renderAlertTrail();
+  } else if (alertHistory.length && alertHistory[0].resolved == null && !r.severity) {
+    alertHistory[0].resolved = r.ts;
+    renderActiveAlerts();
+    renderAlertTrail();
+  }
+}
+
+function renderActiveAlerts() {
+  const list = document.getElementById('activeAlertList');
+  const active = alertHistory.filter(a => !a.resolved).slice(0, 5);
+  if (!active.length) {
+    list.innerHTML = '<div class="active-row is-ok"><div class="active-row-top"><i data-lucide="check"></i><div class="msg">All sensors nominal — no active anomalies.</div></div></div>';
+    return;
+  }
+  list.innerHTML = active.map(a => `
+    <div class="active-row ${a.severity === 'warning' ? 'is-warning' : ''}">
+      <div class="active-row-top">
+        <i data-lucide="alert-triangle"></i>
+        <div class="msg"><strong>${a.severity.toUpperCase()}</strong> — ${a.msg}. Health Index: ${fmt(a.health,1)}.</div>
+      </div>
+      <div class="active-row-meta">
+        <span class="when">${timeStr(a.ts)}</span>
+        <span class="badge ${a.severity === 'critical' ? 'badge-danger' : 'badge-hazard'}">${a.severity}</span>
+      </div>
+    </div>`).join('');
+}
+
+function renderAlertTrail() {
+  const trail = document.getElementById('alertTrail');
+  if (!alertHistory.length) {
+    trail.innerHTML = '<div class="chart-empty">No alerts recorded.</div>';
+    return;
+  }
+  trail.innerHTML = alertHistory.slice(0, 30).map(a => `
+    <div class="entry" data-severity="${a.severity}">
+      <div class="entry-head">
+        <span class="entry-kind">${a.severity.charAt(0).toUpperCase()+a.severity.slice(1)} — ${a.msg}</span>
+        <span class="entry-when">${a.ts.toLocaleString()}</span>
+      </div>
+      <div class="entry-summary">Health Index at ${fmt(a.health,1)}${a.resolved ? ' · Resolved ' + timeStr(a.resolved) : ' · <strong style="color:var(--danger)">Active</strong>'}</div>
+    </div>`).join('');
+}
+
+// ─────────── PROGNOSTICS SECTION ───────────
+const SHAP_KEYS = ['vibX','vibY','vibZ','temp','current'];
+const SHAP_NAMES = { vibX:'Vibration X', vibY:'Vibration Y', vibZ:'Vibration Z', temp:'Temperature', current:'Current Draw' };
+
+function refreshPrognostics() {
+  if (!telemetryLog.length) return;
+  const r = telemetryLog[0];
+  const deg = degradationFactor();
+
+  // SHAP contributions (simulated weights)
+  const weights = {
+    vibX: 0.38 + deg * 0.12,
+    vibY: 0.22 + deg * 0.08,
+    vibZ: 0.18 + deg * 0.05,
+    temp: 0.12 + deg * 0.04,
+    current: 0.10 + deg * 0.03,
+  };
+  const total = Object.values(weights).reduce((a,b)=>a+b,0);
+  const sorted = SHAP_KEYS.slice().sort((a,b)=>weights[b]-weights[a]);
+  const shapBody = document.getElementById('shapBody');
+  shapBody.innerHTML = sorted.map(k => {
+    const pct = +(weights[k]/total*100).toFixed(1);
+    return `<div class="bar-row">
+      <span class="bar-name">${SHAP_NAMES[k]}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
+      <span class="bar-val">${pct}% · ${fmt(r.vals[k],3)}</span>
+    </div>`;
+  }).join('');
+
+  // 24-h anomaly histogram
+  const byHour = Array(24).fill(0);
+  alertHistory.forEach(a => byHour[a.ts.getHours()]++);
+  const peak = Math.max(...byHour, 1);
+  const bars = byHour.map((n, h) => `
+    <span class="hour-col" data-empty="${n===0}" title="${String(h).padStart(2,'0')}:00 — ${n} anomaly${n!==1?'s':''}">
+      <span class="hour-bar" style="height:${n ? Math.max((n/peak)*100,4) : 2}%"></span>
+    </span>`).join('');
+  const axis = byHour.map((_,h) => `<span>${h%3===0?String(h).padStart(2,'0'):''}</span>`).join('');
+  document.getElementById('hoursBody').innerHTML = peak > 0
+    ? `<div class="hours">${bars}</div><div class="hour-axis">${axis}</div>`
+    : '<div class="chart-empty">No anomalies recorded yet.</div>';
+
+  // RUL projection chart
+  const projLabels = [], projRul = [], projHi = [], projLo = [];
+  for (let i = 0; i <= 20; i++) {
+    const h = (Date.now() / 3600000 + i * 24).toFixed(0);
+    const pDeg = Math.min(1, deg + i * 0.012);
+    const pRul = Math.max(0, (1-pDeg)*3200);
+    projLabels.push('D+' + i);
+    projRul.push(+pRul.toFixed(0));
+    projHi.push(+(pRul * 1.12).toFixed(0));
+    projLo.push(+(pRul * 0.88).toFixed(0));
+  }
+  if (rulProjChart) {
+    rulProjChart.data.labels = projLabels;
+    rulProjChart.data.datasets[0].data = projRul;
+    rulProjChart.data.datasets[1].data = projHi;
+    rulProjChart.data.datasets[2].data = projLo;
+    rulProjChart.update();
+  }
+
+  // Sensor scorecard
+  const baseVals = BASELINE;
+  const sensorScoreBody = document.getElementById('sensorScoreBody');
+  const sensorRows = SHAP_KEYS.slice().sort((a,b)=>{
+    const da = Math.abs(r.vals[a]-baseVals[a])/baseVals[a];
+    const db = Math.abs(r.vals[b]-baseVals[b])/baseVals[b];
+    return db - da;
+  });
+  sensorScoreBody.innerHTML = sensorRows.map(k => {
+    const dev = ((r.vals[k]-baseVals[k])/baseVals[k]*100).toFixed(1);
+    const ok = Math.abs(dev) < 15;
+    const warn = Math.abs(dev) >= 15 && Math.abs(dev) < 40;
+    const badge = ok ? `<span class="badge badge-ok">Normal</span>` : warn ? `<span class="badge badge-hazard">Warning</span>` : `<span class="badge badge-danger">Critical</span>`;
+    return `<tr>
+      <td style="font-weight:600">${SHAP_NAMES[k]}</td>
+      <td style="text-align:center" class="mono">${fmt(r.vals[k],3)} ${UNITS[k]}</td>
+      <td style="text-align:center;color:var(--faint)" class="mono">${fmt(baseVals[k],3)} ${UNITS[k]}</td>
+      <td><span class="bar-track" style="display:inline-block;width:80px;height:7px"><span class="bar-fill" style="width:${+(weights[k]/total*100).toFixed(0)}%"></span></span></td>
+      <td style="text-align:right">${badge}</td>
+    </tr>`;
+  }).join('');
+
+  // KPI deltas
+  document.getElementById('pHealth').textContent       = fmt(r.health, 1);
+  document.getElementById('pRul').textContent          = r.rulHours + ' h';
+  document.getElementById('pAnomalies').textContent    = alertHistory.length;
+  document.getElementById('pDegRate').textContent     = (deg * 0.05).toFixed(4);
+  document.getElementById('pAnomalyDelta').textContent = 'total since session start';
+  document.getElementById('pHealthDelta').textContent  = deg < 0.1 ? 'Healthy — low degradation' : deg < 0.4 ? 'Moderate degradation' : 'High degradation detected';
+}
+
+// ─────────── REPORTS SECTION ───────────
+const REPORT_TEMPLATES = [
+  { name: 'Monthly Health Summary', period: 'Sep 2026', date: '2026-09-01', anomalies: 14, avgHealth: 91.2 },
+  { name: 'Weekly Prognostics', period: 'Wk 38', date: '2026-09-21', anomalies: 3, avgHealth: 88.4 },
+  { name: 'Vibration Analysis', period: 'Aug 2026', date: '2026-08-31', anomalies: 21, avgHealth: 86.1 },
+  { name: 'Bearing Inspection Report', period: 'Aug 2026', date: '2026-08-15', anomalies: 8, avgHealth: 89.7 },
+  { name: 'Monthly Health Summary', period: 'Aug 2026', date: '2026-08-01', anomalies: 19, avgHealth: 92.3 },
+];
+
+function buildReportsTable() {
+  const reports = [...REPORT_TEMPLATES];
+  if (telemetryLog.length) {
+    reports.unshift({ name: 'Live Session Report', period: 'Current', date: new Date().toISOString().slice(0,10), anomalies: alertHistory.length, avgHealth: +(telemetryLog.reduce((s,r)=>s+r.health,0)/telemetryLog.length).toFixed(1) });
+  }
+  document.getElementById('reportsBody').innerHTML = reports.map(rep => `<tr>
+    <td style="font-weight:600;color:var(--ink)">${rep.name}</td>
+    <td style="color:var(--muted)">${rep.period}</td>
+    <td style="color:var(--muted)">${rep.date}</td>
+    <td>${rep.anomalies > 15 ? `<span class="badge badge-danger">${rep.anomalies}</span>` : rep.anomalies > 5 ? `<span class="badge badge-hazard">${rep.anomalies}</span>` : `<span class="badge badge-ok">${rep.anomalies}</span>`}</td>
+    <td class="mono" style="color:${rep.avgHealth>80?'var(--ok)':rep.avgHealth>60?'var(--hazard)':'var(--danger)'};font-weight:600">${rep.avgHealth}%</td>
+    <td style="text-align:right;white-space:nowrap">
+      <button class="btn btn-outline btn-sm" onclick="alert('Download report: ${rep.name}')"><i data-lucide="download"></i> Download</button>
+    </td>
+  </tr>`).join('');
+  document.getElementById('repAnomTotal').textContent = alertHistory.length + reports.slice(1).reduce((s,r)=>s+r.anomalies,0);
+}
+
+function generateReport() {
+  const n = { name: 'Generated Report', period: new Date().toLocaleDateString(), date: new Date().toISOString().slice(0,10), anomalies: alertHistory.length, avgHealth: telemetryLog.length ? +(telemetryLog.reduce((s,r)=>s+r.health,0)/telemetryLog.length).toFixed(1) : 0 };
+  REPORT_TEMPLATES.unshift(n);
+  buildReportsTable();
+}
+
+// ─────────── AUDIT LOG ───────────
+function buildAuditTable() {
+  const body = document.getElementById('auditBody');
+  if (!telemetryLog.length) {
+    body.innerHTML = '<tr><td colspan="9" class="cell-empty">No records yet. Start the simulation.</td></tr>';
+    document.getElementById('auditCount').textContent = '0 records';
+    return;
+  }
+  body.innerHTML = telemetryLog.slice(0, 200).map(rec => {
+    const ev = rec.event ? `<span class="badge badge-${rec.severity==='critical'?'danger':'hazard'}">${rec.event}</span>` : '—';
+    return `<tr>
+      <td style="white-space:nowrap;color:var(--muted);font-size:.78rem">${rec.ts.toLocaleString()}</td>
+      <td class="mono">${fmt(rec.vals.vibX,3)}</td>
+      <td class="mono">${fmt(rec.vals.vibY,3)}</td>
+      <td class="mono">${fmt(rec.vals.vibZ,3)}</td>
+      <td class="mono">${fmt(rec.vals.temp,1)}</td>
+      <td class="mono">${fmt(rec.vals.current,3)}</td>
+      <td class="mono" style="color:${rec.health>70?'var(--ok)':rec.health>40?'var(--hazard)':'var(--danger)'};font-weight:600">${fmt(rec.health,1)}</td>
+      <td class="mono">${rec.rulHours}</td>
+      <td>${ev}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('auditCount').textContent = telemetryLog.length + ' records';
+}
+
+// ─────────── SYSTEM INFO ───────────
+function refreshSysInfo() {
+  document.getElementById('sysDbSize').textContent = telemetryLog.length + ' rows in memory';
+  const memMB = (typeof performance !== 'undefined' && performance.memory)
+    ? Math.round(performance.memory.usedJSHeapSize / 1e6)
+    : 'N/A';
+  document.getElementById('sysMemory').textContent = typeof memMB === 'number' ? memMB + ' MB' : memMB;
+}
+
+// ─────────── CALIBRATION ───────────
+function saveCalib() {
+  const note = document.getElementById('calibSaveNote');
+  note.className = 'save-note is-saved';
+  note.textContent = '✓ Calibration saved — taking effect immediately.';
+  setTimeout(() => { note.className = 'save-note'; note.textContent = 'All settings saved.'; }, 3000);
+}
+function resetCalib() {
+  document.getElementById('sensRange').value = 50;
+  document.getElementById('sensVal').textContent = '50%';
+  document.getElementById('decayRange').value = 7;
+  document.getElementById('decayVal').textContent = '7d';
+  document.getElementById('calibSaveNote').textContent = 'Restored to defaults.';
+}
+
+// ─────────── EXPORT CSV ───────────
+function exportCSV() {
+  if (!telemetryLog.length) { alert('No data to export yet.'); return; }
+  const header = 'timestamp,vibX,vibY,vibZ,temp,total_current,motor_current,aux_current,total_voltage,motor_voltage,cell1,cell2,cell3,cell4,cell_delta_mv,health,rul_hours,status\n';
+  const rows = telemetryLog.map(r =>
+    `"${r.ts.toISOString()}",${r.vals.vibX},${r.vals.vibY},${r.vals.vibZ},${r.vals.temp},${r.vals.totalCurrent},${r.vals.motorCurrent},${r.vals.auxCurrent},${r.vals.totalVoltage},${r.vals.motorVoltage},${r.vals.cell1},${r.vals.cell2},${r.vals.cell3},${r.vals.cell4},${r.vals.cellDeltaMv},${r.health},${r.rulHours},"${r.status}"`
+  ).join('\n');
+  const blob = new Blob([header + rows], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'equipmenthealth-' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+function clearLog() { telemetryLog.length = 0; document.getElementById('logBody').innerHTML = '<tr><td colspan="13" class="cell-empty">Log cleared.</td></tr>'; }
+
+// ─────────── STREAM TOGGLE ───────────
+function toggleStream(btn) {
+  streaming = !streaming;
+  btn.innerHTML = streaming ? '<i data-lucide="pause"></i><span class="btn-label">Pause</span>' : '<i data-lucide="play"></i><span class="btn-label">Resume</span>';
+  const pill = document.getElementById('globalLivePill');
+  pill.className = streaming ? 'live-pill is-live' : 'live-pill is-off';
+}
+
+// ─────────── TRAJECTORY RANGE ───────────
+document.getElementById('trajRangeGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.range-btn');
+  if (!btn) return;
+  document.querySelectorAll('#trajRangeGroup .range-btn').forEach(b => b.classList.toggle('is-active', b === btn));
+});
+
+// ─────────── ALERT KIND FILTER ───────────
+document.getElementById('alertKindGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.kind-btn');
+  if (!btn) return;
+  document.querySelectorAll('#alertKindGroup .kind-btn').forEach(b => b.classList.toggle('is-active', b === btn));
+  const k = btn.dataset.k;
+  const filtered = k === 'all' ? alertHistory : alertHistory.filter(a => a.severity === k);
+  const trail = document.getElementById('alertTrail');
+  if (!filtered.length) { trail.innerHTML = '<div class="chart-empty">No ' + k + ' alerts.</div>'; return; }
+  trail.innerHTML = filtered.slice(0, 30).map(a => `
+    <div class="entry" data-severity="${a.severity}">
+      <div class="entry-head">
+        <span class="entry-kind">${a.severity.charAt(0).toUpperCase()+a.severity.slice(1)} — ${a.msg}</span>
+        <span class="entry-when">${a.ts.toLocaleString()}</span>
+      </div>
+      <div class="entry-summary">Health Index: ${fmt(a.health,1)}${a.resolved?' · Resolved':'· Active'}</div>
+    </div>`).join('');
+});
+
+// ─────────── MAIN LOOP ───────────
+let tickCount = 0;
+let lastTelemetryReading = null;
+
+function tick() {
+  if (!streaming) return;
+  const r = simulateReading();
+  lastTelemetryReading = r;
+  updateKPIs(r);
+  updateTrajectory(r);
+  updateOsc(r);
+  updateLogTable(r);
+  updateAlerts(r);
+  if (currentPage === 'prognostics') refreshPrognostics();
+  tickCount++;
+  document.getElementById('liveHz').textContent = (tickCount % 10 < 5) ? '2' : '2';
+}
+
+window.getLiveTelemetry = function() {
+  if (!lastTelemetryReading) {
+    return {
+      health: 98.4,
+      rulHours: 3180,
+      rulLo: 2798,
+      rulHi: 3561,
+      totalCurrent: 2.824,
+      motorCurrent: 2.301,
+      auxCurrent: 0.523,
+      totalVoltage: 14.82,
+      motorVoltage: 12.04,
+      cell1: 3.715,
+      cell2: 3.702,
+      cell3: 3.710,
+      cell4: 3.693,
+      cellDeltaMv: 22,
+      status: 'NORMAL',
+      topAxis: 'Vib Y',
+      temp: 42.0
+    };
+  }
+  const topAxis = lastTelemetryReading.vals.vibX > lastTelemetryReading.vals.vibY ? 'Vib X' : 'Vib Y';
+  return {
+    health: lastTelemetryReading.health,
+    rulHours: lastTelemetryReading.rulHours,
+    rulLo: lastTelemetryReading.rulLo,
+    rulHi: lastTelemetryReading.rulHi,
+    totalCurrent: lastTelemetryReading.vals.totalCurrent,
+    motorCurrent: lastTelemetryReading.vals.motorCurrent,
+    auxCurrent: lastTelemetryReading.vals.auxCurrent,
+    totalVoltage: lastTelemetryReading.vals.totalVoltage,
+    motorVoltage: lastTelemetryReading.vals.motorVoltage,
+    cell1: lastTelemetryReading.vals.cell1,
+    cell2: lastTelemetryReading.vals.cell2,
+    cell3: lastTelemetryReading.vals.cell3,
+    cell4: lastTelemetryReading.vals.cell4,
+    cellDeltaMv: lastTelemetryReading.vals.cellDeltaMv,
+    status: lastTelemetryReading.status,
+    topAxis: topAxis,
+    temp: lastTelemetryReading.vals.temp
+  };
+};
+
+setInterval(tick, 500);
+
+// Initial prognostics range group
+document.getElementById('progRangeGroup').addEventListener('click', e => {
+  const btn = e.target.closest('.range-btn');
+  if (!btn) return;
+  document.querySelectorAll('#progRangeGroup .range-btn').forEach(b => b.classList.toggle('is-active', b === btn));
+  if (currentPage === 'prognostics') refreshPrognostics();
+});
+
+// ─────────── GSAP NUMBER COUNTER ───────────
+function animateCounter(el, from, to, duration = 0.6, suffix = '') {
+  if (!el || typeof gsap === 'undefined') return;
+  const obj = { val: from };
+  gsap.to(obj, {
+    val: to,
+    duration,
+    ease: 'power2.out',
+    onUpdate: () => { el.textContent = Number.isInteger(to) ? Math.round(obj.val) + suffix : obj.val.toFixed(1) + suffix; }
+  });
+}
+
+// ─────────── GSAP PAGE ENTRANCE ───────────
+window.addEventListener('load', () => {
+  // Mount Copilot Chatbot
+  if (typeof Chatbot !== 'undefined') {
+    Chatbot.mount();
+  }
+
+  // Initialize Lucide icons (runs after all DOM is ready)
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+
+  // Sidebar entrance
+  gsap.from('.sidebar', { x: -30, opacity: 0, duration: 0.5, ease: 'power3.out', clearProps: 'transform,opacity' });
+
+  // Topbar entrance
+  gsap.from('.topbar', { y: -20, opacity: 0, duration: 0.4, ease: 'power2.out', delay: 0.1, clearProps: 'transform,opacity' });
+
+  // Stagger metric cards
+  gsap.from('.metric', {
+    y: 18, opacity: 0, duration: 0.4, ease: 'power2.out',
+    stagger: 0.06, delay: 0.25, clearProps: 'transform,opacity'
+  });
+
+  // Stagger content cards
+  gsap.from('#sec-overview .card', {
+    y: 22, opacity: 0, duration: 0.45, ease: 'power2.out',
+    stagger: 0.09, delay: 0.35, clearProps: 'transform,opacity'
+  });
+
+  // Sensor tiles stagger
+  gsap.from('.sensor-tile', {
+    scale: 0.94, opacity: 0, duration: 0.35, ease: 'back.out(1.4)',
+    stagger: 0.05, delay: 0.45, clearProps: 'transform,opacity'
+  });
+});
+
+// ─────────── TOPBAR SCROLL SHADOW ───────────
+document.querySelector('.main')?.addEventListener('scroll', function() {
+  const topbar = document.querySelector('.topbar');
+  if (topbar) topbar.style.boxShadow = this.scrollTop > 4
+    ? '0 2px 12px rgba(60,40,30,.1)'
+    : '';
+}, { passive: true });
+
+// ─────────── NAV ITEM RIPPLE ───────────
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', function(e) {
+    const rect = this.getBoundingClientRect();
+    const ripple = document.createElement('span');
+    ripple.style.cssText = `
+      position:absolute; border-radius:50%; background:rgba(180,68,31,.15);
+      width:80px; height:80px; pointer-events:none;
+      left:${e.clientX - rect.left - 40}px; top:${e.clientY - rect.top - 40}px;
+      transform:scale(0);
+    `;
+    this.style.position = 'relative';
+    this.style.overflow = 'hidden';
+    this.appendChild(ripple);
+    gsap.to(ripple, {
+      scale: 2.5, opacity: 0, duration: 0.5, ease: 'power2.out',
+      onComplete: () => ripple.remove()
+    });
+  });
+});
+</script>
+</body>
+</html>

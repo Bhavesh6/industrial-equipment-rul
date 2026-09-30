@@ -1,0 +1,50 @@
+{
+  "prototype": "RS-380 Brushed DC Motor",
+  "nominal_voltage_v": 12.0,
+  "nominal_lifetime_hours": 10.0,
+  "failure_threshold_h": 0.70,
+  "sensors": {
+    "battery_voltage": {
+      "mean": 12.20,
+      "std": 0.12,
+      "unit": "V",
+      "weight": 0.05,
+      "description": "Supply battery terminal voltage"
+    },
+    "motor_voltage": {
+      "mean": 11.80,
+      "std": 0.15,
+      "unit": "V",
+      "weight": 0.15,
+      "description": "Voltage across DC motor terminals"
+    },
+    "total_current": {
+      "mean": 2.10,
+      "std": 0.10,
+      "unit": "A",
+      "weight": 0.05,
+      "description": "Total branch current measured via ACS715-20A"
+    },
+    "motor_current": {
+      "mean": 1.85,
+      "std": 0.08,
+      "unit": "A",
+      "weight": 0.25,
+      "description": "Dedicated motor current via second ACS715-20A"
+    },
+    "temperature": {
+      "mean": 38.00,
+      "std": 1.20,
+      "unit": "°C",
+      "weight": 0.25,
+      "description": "Casing temperature via DS18B20"
+    },
+    "vibration": {
+      "mean": 0.35,
+      "std": 0.05,
+      "unit": "g",
+      "weight": 0.25,
+      "description": "Analog vibration intensity via 801S module"
+    }
+  }
+}

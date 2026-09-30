@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alerts — SafetyFirst Admin</title>
+    <meta name="description" content="Sensor-reported hazards, whether they're holding the gate, and the full history.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/app.css?v=20260807a">
+    <style>
+        .active-list { display: flex; flex-direction: column; gap: 10px; }
+        /* Two rows, not one wrapping flex row: a long message wraps to
+           several lines, and center-aligning short siblings (the icon, the
+           timestamp) against that tall block put them floating in the
+           vertical middle of the paragraph instead of level with its first
+           line — reading as misaligned rather than merely wrapped. Icon and
+           message share a top-aligned row; timestamp and the Acknowledge
+           button get their own row underneath. */
+        .active-row {
+            display: flex; flex-direction: column; gap: 8px;
+            padding: 13px 16px;
+            border-radius: var(--radius);
+            border: 1px solid #fcd9a8;
+            background: var(--hazard-soft);
+        }
+        .active-row.is-warning { border-color: #ecccbf; background: var(--accent-soft); }
+        .active-row-top { display: flex; align-items: flex-start; gap: 10px; }
+        .active-row-top i { margin-top: 3px; flex-shrink: 0; }
+        .active-row .msg { flex: 1; min-width: 0; font-size: .86rem; color: var(--ink); }
+        .active-row .msg strong { font-weight: 700; text-transform: capitalize; }
+        .active-row-meta {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; flex-wrap: wrap; padding-left: 26px;
+        }
+        .active-row .when { font-size: .72rem; color: var(--faint); }
+
+        .trail { position: relative; padding: 4px 0 4px 30px; }
+        .trail::before {
+            content: ''; position: absolute; left: 9px; top: 12px; bottom: 12px;
+            width: 2px; background: var(--border);
+        }
+        .entry { position: relative; padding: 14px 0; }
+        .entry + .entry { border-top: 1px solid var(--border); }
+        .entry::before {
+            content: ''; position: absolute; left: -25px; top: 20px;
+            width: 10px; height: 10px; border-radius: 50%;
+            background: var(--surface); border: 2px solid var(--border);
+        }
+        .entry[data-severity="critical"]::before { border-color: var(--hazard); background: var(--hazard-soft); }
+        .entry-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+        .entry-kind { font-weight: 600; font-size: .9rem; text-transform: capitalize; }
+        .entry-when { font-size: .74rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+        .entry-summary { font-size: .86rem; color: var(--muted); margin-top: 3px; }
+        .entry-ack { font-size: .76rem; color: var(--faint); margin-top: 4px; }
+
+        .sim-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+        .sim-field { display: flex; flex-direction: column; gap: 5px; }
+        .sim-field label { font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+        .sim-field input, .sim-field select { min-width: 160px; }
+
+        .reading-row, .threshold-row {
+            display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+            padding: 10px 0; font-size: .84rem;
+        }
+        .reading-row + .reading-row, .threshold-row + .threshold-row { border-top: 1px solid var(--border); }
+        .reading-row .kind, .threshold-row .kind { font-weight: 600; min-width: 90px; text-transform: capitalize; }
+        .reading-row .val { font-variant-numeric: tabular-nums; color: var(--ink); }
+        .reading-row .age { font-size: .72rem; color: var(--faint); margin-left: auto; }
+        .threshold-row .levels { flex: 1; color: var(--muted); min-width: 160px; }
+        .threshold-row .row-actions { display: flex; gap: 10px; margin-left: auto; }
+        .threshold-row .row-actions button {
+            background: none; border: none; cursor: pointer; padding: 0;
+            font-size: .78rem; font-weight: 600; color: var(--accent);
+        }
+        .threshold-row .row-actions button.danger { color: var(--faint); }
+        .threshold-row .row-actions button.danger:hover { color: var(--danger); }
+
+        /* Trend chart hand-drawn with SVG, same approach as analytics.html —
+           one line chart doesn't justify a charting library. */
+        .trend-svg { width: 100%; height: 130px; display: block; overflow: visible; }
+        .chart-empty {
+            display: flex; align-items: center; justify-content: center;
+            height: 130px; color: var(--faint); font-size: .84rem; text-align: center; padding: 0 20px;
+        }
+        #histLegend .legend-dot {
+            width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0;
+        }
+        #histLegend .legend-item { display: inline-flex; align-items: center; gap: 5px; text-transform: capitalize; }
+        #histLists { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 4px 24px; }
+        #histLists .hist-col-title { font-size: .72rem; font-weight: 600; text-transform: capitalize; margin-bottom: 2px; }
+
+        @media (max-width: 640px) {
+            /* Three 160px-min fields side by side don't fit a phone width,
+               so they were wrapping one-per-line at a partial width each —
+               readable but cramped, with a stray gap on every line. Full
+               width per field reads as a normal mobile form instead. */
+            .sim-row { flex-direction: column; align-items: stretch; }
+            .sim-field, .sim-field input, .sim-field select { width: 100%; min-width: 0; }
+            #simBtn, #thSaveBtn { width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <main class="main">
+            <div class="content">
+
+                <section class="card mb-5" id="activeCard" hidden>
+                    <div class="card-head">
+                        <span class="card-title"><i class="fas fa-triangle-exclamation"></i>Active now</span>
+                        <span class="text-xs" style="color:var(--faint)" id="activeCount"></span>
+                    </div>
+                    <div class="card-body">
+                        <div class="active-list" id="activeList"></div>
+                    </div>
+                </section>
+
+                <section class="card mb-5">
+                    <div class="card-head">
+                        <span class="card-title"><i class="fas fa-vial"></i>Simulate an alert</span>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-xs" style="color:var(--muted);margin:0 0 14px">
+                            No sensor hardware is wired up yet — this posts to the same endpoint a real
+                            device will once the ESP32 sensor board exists, so nothing changes here when
+                            it arrives. A critical alert holds the gate immediately.
+                        </p>
+                        <div class="sim-row">
+                            <div class="sim-field">
+                                <label for="simKind">Kind</label>
+                                <input type="text" id="simKind" class="field" placeholder="e.g. gas, smoke" value="gas">
+                            </div>
+                            <div class="sim-field">
+                                <label for="simSeverity">Severity</label>
+                                <select id="simSeverity" class="field">
+                                    <option value="critical">Critical — holds the gate</option>
+                                    <option value="warning">Warning — heads-up only</option>
+                                </select>
+                            </div>
+                            <div class="sim-field" style="flex:1">
+                                <label for="simMessage">Message</label>
+                                <input type="text" id="simMessage" class="field" placeholder="Optional detail, e.g. sensor location">
+                            </div>
+                            <button id="simBtn" class="btn btn-primary btn-sm"><i class="fas fa-bolt"></i>Fire test alert</button>
+                        </div>
+                        <p id="simMsg" class="text-xs hidden" style="margin-top:10px"></p>
+                    </div>
+                </section>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+                    <section class="card">
+                        <div class="card-head">
+                            <span class="card-title"><i class="fas fa-gauge-high"></i>Live Readings</span>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-xs" style="color:var(--muted);margin:0 0 10px">
+                                The latest value reported for each sensor kind, whether or not it's
+                                currently breaching a threshold.
+                            </p>
+                            <div id="readingsList"></div>
+                        </div>
+                    </section>
+
+                    <section class="card">
+                        <div class="card-head">
+                            <span class="card-title"><i class="fas fa-sliders"></i>Sensor Thresholds</span>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-xs" style="color:var(--muted);margin:0 0 10px">
+                                A sensor kind with no threshold set just has its readings logged —
+                                nothing alerts until one exists. A breach raises the same alert the
+                                Simulate button above does.
+                            </p>
+                            <div id="thresholdList" class="mb-3"></div>
+                            <div class="sim-row">
+                                <div class="sim-field">
+                                    <label for="thKind">Kind</label>
+                                    <input type="text" id="thKind" class="field" placeholder="e.g. gas">
+                                </div>
+                                <div class="sim-field">
+                                    <label for="thWarning">Warning at</label>
+                                    <input type="number" id="thWarning" class="field" placeholder="e.g. 400" step="any">
+                                </div>
+                                <div class="sim-field">
+                                    <label for="thCritical">Critical at</label>
+                                    <input type="number" id="thCritical" class="field" placeholder="e.g. 800" step="any">
+                                </div>
+                                <div class="sim-field">
+                                    <label for="thUnit">Unit</label>
+                                    <input type="text" id="thUnit" class="field" placeholder="ppm" style="min-width:90px">
+                                </div>
+                                <div class="sim-field">
+                                    <label for="thDirection">Direction</label>
+                                    <select id="thDirection" class="field">
+                                        <option value="above">Above — higher is worse</option>
+                                        <option value="below">Below — lower is worse</option>
+                                    </select>
+                                </div>
+                                <button id="thSaveBtn" class="btn btn-primary btn-sm"><i class="fas fa-check"></i>Save</button>
+                            </div>
+                            <p id="thMsg" class="text-xs hidden" style="margin-top:10px"></p>
+                        </div>
+                    </section>
+                </div>
+
+                <section class="card mb-5">
+                    <div class="card-head">
+                        <span class="card-title"><i class="fas fa-chart-line"></i>Reading History</span>
+                        <div id="histLegend" class="flex gap-3 text-xs" style="color:var(--faint)"></div>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-xs" style="color:var(--muted);margin:0 0 10px">
+                            Every value each sensor has reported, not just the latest — Live Readings
+                            above is overwritten on each report, this is the trail behind it. Each line
+                            is scaled to its own range so gas ppm, °C, and % can share one chart.
+                        </p>
+                        <div id="histChart"><div class="chart-empty">Loading…</div></div>
+                        <div id="histLists" class="mt-3"></div>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <span class="card-title"><i class="fas fa-clock-rotate-left"></i>History</span>
+                        <span class="text-xs" style="color:var(--faint)" id="histCount"></span>
+                    </div>
+                    <div class="card-body">
+                        <div class="trail" id="trail">
+                            <div style="color:var(--faint);font-size:.86rem">Loading…</div>
+                        </div>
+                    </div>
+                    <div class="card-head" style="border-bottom:none;border-top:1px solid var(--border)">
+                        <span class="text-xs" style="color:var(--faint)" id="pageInfo"></span>
+                        <div class="flex gap-2">
+                            <button id="prevBtn" class="btn btn-outline btn-sm">Previous</button>
+                            <button id="nextBtn" class="btn btn-outline btn-sm">Next</button>
+                        </div>
+                    </div>
+                </section>
+
+                <p class="text-xs mt-5" style="color:var(--faint)">
+                    <i class="fas fa-circle-info mr-1"></i>
+                    A critical alert overrides PPE compliance entirely — someone in full gear still isn't
+                    safe to admit into a gas leak. Clearing one here is logged in the
+                    <a href="audit.html" style="color:var(--accent);font-weight:600">Change Log</a> too.
+                </p>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/config.js?v=20260807a"></script>
+    <script src="js/auth.js?v=20260807a"></script>
+    <script src="js/shell.js?v=20260807a"></script>
+    <script src="js/chatbot.js?v=20260807a"></script>
+    <script>
+        Auth.requireAdmin();
+        Shell.render('alerts', {
+            title: 'Alerts',
+            subtitle: 'Sensor-reported hazards — active status and full history',
+        });
+
+        const el = (id) => document.getElementById(id);
+        let page = 1;
+        const perPage = 20;
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, (c) => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+            ));
+        }
+
+        async function acknowledge(id, btn) {
+            if (btn) { btn.disabled = true; btn.textContent = 'Clearing…'; }
+            try {
+                await Auth.fetch(`/api/alerts/${id}/acknowledge`, { method: 'POST' });
+            } catch (e) { /* refresh below will show the true state either way */ }
+            loadActive();
+            loadHistory();
+        }
+
+        async function loadActive() {
+            try {
+                const res = await Auth.fetch('/api/alerts/active');
+                if (!res.ok) throw new Error('Request failed');
+                const d = await res.json();
+                const list = d.alerts || [];
+                el('activeCard').hidden = list.length === 0;
+                const hasCritical = list.some((a) => a.severity === 'critical');
+                el('activeCount').textContent = hasCritical ? `${d.present_count ?? 0} on site today` : '';
+                el('activeList').innerHTML = list.map((a) => `
+                    <div class="active-row ${a.severity === 'warning' ? 'is-warning' : ''}">
+                        <div class="active-row-top">
+                            <i class="fas ${a.severity === 'critical' ? 'fa-triangle-exclamation' : 'fa-circle-info'}"></i>
+                            <span class="msg"><strong>${escapeHtml(a.kind)}</strong>${a.message ? ' — ' + escapeHtml(a.message) : ''}</span>
+                        </div>
+                        <div class="active-row-meta">
+                            <span class="when">${new Date(a.timestamp).toLocaleString()}</span>
+                            <button type="button" class="btn btn-outline btn-sm" data-ack="${a.id}">Acknowledge</button>
+                        </div>
+                    </div>`).join('');
+            } catch (e) { /* the poll-driven banner elsewhere still covers this */ }
+        }
+
+        function renderHistory(rows) {
+            if (!rows.length) {
+                el('trail').innerHTML = '<div style="color:var(--faint);font-size:.86rem">Nothing recorded yet.</div>';
+                return;
+            }
+            el('trail').innerHTML = rows.map((a) => `
+                <div class="entry" data-severity="${a.severity}">
+                    <div class="entry-head">
+                        <span class="badge ${a.severity === 'critical' ? 'badge-hazard' : 'badge-amber'}" style="font-size:.62rem">${escapeHtml(a.severity)}</span>
+                        <span class="entry-kind">${escapeHtml(a.kind)}</span>
+                        <span class="entry-when">${new Date(a.timestamp).toLocaleString()}</span>
+                        ${a.active ? '<span class="badge badge-danger" style="font-size:.6rem">ACTIVE</span>' : ''}
+                    </div>
+                    ${a.message ? `<div class="entry-summary">${escapeHtml(a.message)}</div>` : ''}
+                    <div class="entry-ack">
+                        ${a.active
+                            ? `<button type="button" class="entry-toggle" data-ack="${a.id}" style="background:none;border:none;cursor:pointer;padding:0;font-weight:600;color:var(--accent)">Acknowledge</button>`
+                            : `Cleared by ${escapeHtml(a.acknowledged_by || 'Unknown')} · ${new Date(a.acknowledged_at).toLocaleString()}`}
+                    </div>
+                </div>`).join('');
+        }
+
+        async function loadHistory() {
+            try {
+                const res = await Auth.fetch(`/api/admin/alerts?page=${page}&per_page=${perPage}`);
+                if (!res.ok) throw new Error('Request failed');
+                const d = await res.json();
+                renderHistory(d.alerts);
+
+                const totalPages = Math.max(Math.ceil(d.total / perPage), 1);
+                el('histCount').textContent = d.total ? `${d.total} total` : '';
+                el('pageInfo').textContent = `Page ${d.page} of ${totalPages}`;
+                el('prevBtn').disabled = page <= 1;
+                el('nextBtn').disabled = page >= totalPages;
+            } catch (e) {
+                el('trail').innerHTML = '<div style="color:var(--danger);font-size:.86rem">Could not load alert history.</div>';
+            }
+        }
+
+        document.body.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-ack]');
+            if (!btn) return;
+            acknowledge(Number(btn.dataset.ack), btn);
+        });
+
+        el('prevBtn').addEventListener('click', () => { if (page > 1) { page--; loadHistory(); } });
+        el('nextBtn').addEventListener('click', () => { page++; loadHistory(); });
+
+        el('simBtn').addEventListener('click', async () => {
+            const btn = el('simBtn');
+            const msg = el('simMsg');
+            const kind = el('simKind').value.trim();
+            if (!kind) {
+                msg.textContent = 'Kind is required.';
+                msg.className = 'text-xs';
+                msg.style.color = 'var(--danger)';
+                msg.classList.remove('hidden');
+                return;
+            }
+            btn.disabled = true;
+            const original = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>Sending…';
+            try {
+                const res = await Auth.fetch('/api/gate/alerts', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        kind, severity: el('simSeverity').value,
+                        message: el('simMessage').value.trim(), source: 'admin console (simulated)',
+                    }),
+                });
+                const d = await res.json();
+                if (!res.ok || !d.success) {
+                    msg.textContent = d.message || 'Could not send the alert.';
+                    msg.style.color = 'var(--danger)';
+                } else {
+                    msg.textContent = 'Sent — it should show up above within a few seconds.';
+                    msg.style.color = 'var(--ok)';
+                    el('simMessage').value = '';
+                    loadActive();
+                    loadHistory();
+                }
+                msg.className = 'text-xs';
+                msg.classList.remove('hidden');
+            } catch (e) {
+                msg.textContent = 'Could not reach the server.';
+                msg.className = 'text-xs';
+                msg.style.color = 'var(--danger)';
+                msg.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = original;
+            }
+        });
+
+        // ---- live readings ----
+        function relativeTime(iso) {
+            const ms = Date.now() - new Date(iso).getTime();
+            if (ms < 60000) return 'just now';
+            if (ms < 3600000) return `${Math.round(ms / 60000)}m ago`;
+            if (ms < 86400000) return `${Math.round(ms / 3600000)}h ago`;
+            if (ms < 604800000) return `${Math.round(ms / 86400000)}d ago`;
+            return new Date(iso).toLocaleString();
+        }
+
+        async function loadReadings() {
+            try {
+                const res = await Auth.fetch('/api/alerts/readings');
+                if (!res.ok) throw new Error('Request failed');
+                const d = await res.json();
+                const rows = d.readings || [];
+                el('readingsList').innerHTML = rows.length
+                    ? rows.map((r) => `
+                        <div class="reading-row">
+                            <span class="kind">${escapeHtml(r.kind)}</span>
+                            <span class="val">${r.value}${escapeHtml(r.unit || '')}</span>
+                            <span class="age">${relativeTime(r.updated_at)}</span>
+                        </div>`).join('')
+                    : '<p class="text-xs" style="color:var(--faint)">No sensor has reported a reading yet.</p>';
+                populateHistLegend(rows.map((r) => r.kind));
+                loadHistoryChart();
+            } catch (e) { /* next poll retries */ }
+        }
+
+        // ---- reading history / trend ----
+        // Fixed hues for the kinds this project ships with, so gas is always
+        // the same color whether or not humidity/temperature also have
+        // readings yet; anything else falls back to a small rotating palette.
+        const HIST_COLORS = { gas: 'var(--accent)', temperature: 'var(--info)', humidity: 'var(--ok)' };
+        const HIST_FALLBACK = ['var(--navy-mid)', 'var(--hazard)', 'var(--danger)'];
+        const histColor = (kind, i) => HIST_COLORS[kind] || HIST_FALLBACK[i % HIST_FALLBACK.length];
+
+        let histKinds = [];
+
+        function populateHistLegend(kinds) {
+            histKinds = kinds;
+            el('histLegend').innerHTML = kinds.map((k, i) => `
+                <span class="legend-item">
+                    <span class="legend-dot" style="background:${histColor(k, i)}"></span>
+                    ${escapeHtml(k)}
+                </span>`).join('');
+        }
+
+        function renderHistoryChart(kinds, seriesRows) {
+            // Each series drawn left-to-right by its own point order (API is
+            // newest-first, flipped here), scaled to its own min/max — units
+            // differ per kind (ppm vs °C vs %), so sharing one y-axis would
+            // flatten two of the three lines. This trades absolute
+            // comparability for being able to see shape and timing together.
+            const W = 1000, H = 150, pad = 6;
+            const polylines = kinds.map((k, i) => {
+                const rows = [...seriesRows[i]].reverse();
+                if (rows.length < 2) return '';
+                const values = rows.map((r) => r.value);
+                const min = Math.min(...values), max = Math.max(...values);
+                const span = max - min || 1;
+                const step = (W - pad * 2) / (rows.length - 1);
+                const points = rows.map((r, idx) =>
+                    `${pad + idx * step},${H - pad - ((r.value - min) / span) * (H - pad * 2)}`
+                ).join(' ');
+                return `<polyline points="${points}" fill="none" stroke="${histColor(k, i)}" stroke-width="2" vector-effect="non-scaling-stroke"></polyline>`;
+            }).join('');
+
+            if (!polylines.trim()) {
+                el('histChart').innerHTML = '<div class="chart-empty">Not enough history yet to draw a trend.</div>';
+            } else {
+                el('histChart').innerHTML = `
+                    <svg class="trend-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+                         aria-label="Sensor readings over time">
+                        ${polylines}
+                    </svg>`;
+            }
+
+            el('histLists').innerHTML = kinds.map((k, i) => {
+                const rows = seriesRows[i].slice(0, 5);
+                return `
+                    <div>
+                        <div class="hist-col-title" style="color:${histColor(k, i)}">${escapeHtml(k)}</div>
+                        ${rows.length
+                            ? rows.map((r) => `
+                                <div class="reading-row" style="padding:6px 0">
+                                    <span class="val">${r.value}${escapeHtml(r.unit || '')}</span>
+                                    <span class="age">${relativeTime(r.timestamp)}</span>
+                                </div>`).join('')
+                            : '<p class="text-xs" style="color:var(--faint)">No history yet.</p>'}
+                    </div>`;
+            }).join('');
+        }
+
+        async function loadHistoryChart() {
+            if (!histKinds.length) {
+                el('histChart').innerHTML = '<div class="chart-empty">No history yet.</div>';
+                el('histLists').innerHTML = '';
+                return;
+            }
+            try {
+                const results = await Promise.all(histKinds.map((k) =>
+                    Auth.fetch(`/api/alerts/readings/history?kind=${encodeURIComponent(k)}&per_page=60`).then((r) => r.json())
+                ));
+                renderHistoryChart(histKinds, results.map((d) => d.readings || []));
+            } catch (e) {
+                el('histChart').innerHTML = '<div class="chart-empty" style="color:var(--danger)">Could not load history.</div>';
+            }
+        }
+
+        // ---- sensor thresholds ----
+        // Kept as the full object from the server and re-sent whole on every
+        // save — site_settings.update() replaces sensor_thresholds entirely
+        // rather than merging keys, same as required_ppe already works, so
+        // editing one kind without wiping the others means round-tripping
+        // all of them.
+        let thresholds = {};
+
+        function renderThresholds() {
+            const kinds = Object.keys(thresholds);
+            el('thresholdList').innerHTML = kinds.length
+                ? kinds.map((kind) => {
+                    const t = thresholds[kind];
+                    const cmp = t.direction === 'below' ? '≤' : '≥';
+                    const parts = [];
+                    if (t.warning_at !== null && t.warning_at !== undefined) parts.push(`warning ${cmp} ${t.warning_at}${t.unit || ''}`);
+                    if (t.critical_at !== null && t.critical_at !== undefined) parts.push(`critical ${cmp} ${t.critical_at}${t.unit || ''}`);
+                    return `
+                        <div class="threshold-row">
+                            <span class="kind">${escapeHtml(kind)}</span>
+                            <span class="levels">${escapeHtml(parts.join(' · '))}</span>
+                            <span class="row-actions">
+                                <button type="button" data-edit="${escapeHtml(kind)}">Edit</button>
+                                <button type="button" class="danger" data-remove="${escapeHtml(kind)}">Remove</button>
+                            </span>
+                        </div>`;
+                }).join('')
+                : '<p class="text-xs" style="color:var(--faint)">No thresholds configured — readings are logged, nothing alerts yet.</p>';
+        }
+
+        async function loadThresholds() {
+            try {
+                const res = await Auth.fetch('/api/admin/settings');
+                if (!res.ok) throw new Error('Request failed');
+                const d = await res.json();
+                thresholds = d.settings.sensor_thresholds || {};
+                renderThresholds();
+            } catch (e) {
+                el('thresholdList').innerHTML = '<p class="text-xs" style="color:var(--danger)">Could not load thresholds.</p>';
+            }
+        }
+
+        function showThresholdMsg(text, ok) {
+            const msg = el('thMsg');
+            msg.textContent = text;
+            msg.className = 'text-xs';
+            msg.style.color = ok ? 'var(--ok)' : 'var(--danger)';
+            msg.classList.remove('hidden');
+        }
+
+        async function saveThresholds() {
+            const res = await Auth.fetch('/api/admin/settings', {
+                method: 'PUT',
+                body: JSON.stringify({ sensor_thresholds: thresholds }),
+            });
+            const d = await res.json();
+            if (!res.ok || !d.success) {
+                showThresholdMsg(d.message || 'Could not save.', false);
+                return false;
+            }
+            thresholds = d.settings.sensor_thresholds || {};
+            renderThresholds();
+            return true;
+        }
+
+        el('thSaveBtn').addEventListener('click', async () => {
+            const kind = el('thKind').value.trim();
+            const warningRaw = el('thWarning').value;
+            const criticalRaw = el('thCritical').value;
+            if (!kind) return showThresholdMsg('Kind is required.', false);
+            if (warningRaw === '' && criticalRaw === '') {
+                return showThresholdMsg('Set at least a warning or critical level.', false);
+            }
+            const btn = el('thSaveBtn');
+            btn.disabled = true;
+            const previous = thresholds;
+            thresholds = {
+                ...thresholds,
+                [kind]: {
+                    warning_at: warningRaw === '' ? null : Number(warningRaw),
+                    critical_at: criticalRaw === '' ? null : Number(criticalRaw),
+                    unit: el('thUnit').value.trim(),
+                    direction: el('thDirection').value,
+                },
+            };
+            const ok = await saveThresholds();
+            btn.disabled = false;
+            if (ok) {
+                showThresholdMsg(`Saved — ${kind} readings are now checked against this.`, true);
+                el('thKind').value = '';
+                el('thWarning').value = '';
+                el('thCritical').value = '';
+                el('thUnit').value = '';
+            } else {
+                thresholds = previous; // the failed attempt shouldn't linger in the in-memory copy
+            }
+        });
+
+        el('thresholdList').addEventListener('click', async (e) => {
+            const editBtn = e.target.closest('[data-edit]');
+            const removeBtn = e.target.closest('[data-remove]');
+
+            if (editBtn) {
+                const kind = editBtn.dataset.edit;
+                const t = thresholds[kind];
+                el('thKind').value = kind;
+                el('thWarning').value = t.warning_at ?? '';
+                el('thCritical').value = t.critical_at ?? '';
+                el('thUnit').value = t.unit || '';
+                el('thDirection').value = t.direction || 'above';
+                el('thKind').focus();
+                return;
+            }
+
+            if (removeBtn) {
+                const kind = removeBtn.dataset.remove;
+                const previous = thresholds;
+                const { [kind]: _dropped, ...rest } = thresholds;
+                thresholds = rest;
+                if (!(await saveThresholds())) {
+                    thresholds = previous;
+                    renderThresholds();
+                } else {
+                    showThresholdMsg(`Removed — ${kind} readings will be logged but won't alert.`, true);
+                }
+            }
+        });
+
+        loadActive();
+        loadHistory();
+        loadReadings();
+        loadThresholds();
+        setInterval(loadActive, 6000);
+        setInterval(loadReadings, 6000);
+    </script>
+</body>
+</html>

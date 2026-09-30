@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EquipmentHealth — All-in-One Industrial Prognostics Console</title>
+    <meta name="description" content="All-in-one predictive maintenance and Remaining Useful Life (RUL) digital twin for RS-380 DC motor testbed.">
+
+    <!-- Fonts: Fraunces Serif + Inter + JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome Icons & Chart.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Design System Stylesheet -->
+    <link rel="stylesheet" href="css/app.css">
+
+    <style>
+        .tab-section { display: none; }
+        .tab-section.is-active { display: block; animation: fadeIn 0.2s ease-out; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            animation: pulse-dot 2s infinite ease-in-out;
+        }
+        @keyframes pulse-dot {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        /* Nav Pills inside console */
+        .subnav-pills {
+            display: flex;
+            gap: 8px;
+            background: var(--surface-alt);
+            padding: 6px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            margin-bottom: 24px;
+            overflow-x: auto;
+        }
+        .subnav-btn {
+            padding: 8px 16px;
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: var(--muted);
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s ease-out;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .subnav-btn:hover {
+            color: var(--ink);
+            background: var(--surface);
+        }
+        .subnav-btn.is-active {
+            color: #ffffff;
+            background: var(--accent);
+            box-shadow: var(--shadow-sm);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app">
+        
+        <!-- SIDEBAR NAVIGATION -->
+        <aside class="sidebar" id="appSidebar">
+            <div class="sidebar-head">
+                <a href="javascript:void(0)" onclick="switchView('live')" class="brand-mark">
+                    <div class="brand-logo"><i class="fas fa-bolt"></i></div>
+                    <div>
+                        <div class="brand-name">EquipmentHealth</div>
+                        <div class="brand-tag">RS-380 Prognostics Suite</div>
+                    </div>
+                </a>
+            </div>
+
+            <nav class="sidebar-nav" style="padding:16px 12px;">
+                <div class="sidebar-section">Main Console</div>
+                <a href="javascript:void(0)" onclick="switchView('live')" id="nav-live" class="nav-link active">
+                    <i class="fas fa-gauge-high"></i>
+                    <span>SCADA Overview</span>
+                </a>
+                <a href="javascript:void(0)" onclick="switchView('prognostics')" id="nav-prognostics" class="nav-link">
+                    <i class="fas fa-chart-simple"></i>
+                    <span>Prognostics &amp; SHAP</span>
+                </a>
+                <a href="javascript:void(0)" onclick="switchView('rca')" id="nav-rca" class="nav-link">
+                    <i class="fas fa-microscope"></i>
+                    <span>Root Cause Analysis</span>
+                </a>
+                <a href="javascript:void(0)" onclick="switchView('copilot')" id="nav-copilot" class="nav-link">
+                    <i class="fas fa-comment-medical"></i>
+                    <span>Maintenance Copilot</span>
+                </a>
+
+                <div class="sidebar-section">Data &amp; Calibration</div>
+                <a href="javascript:void(0)" onclick="switchView('historian')" id="nav-historian" class="nav-link">
+                    <i class="fas fa-database"></i>
+                    <span>Historian Log</span>
+                </a>
+                <a href="javascript:void(0)" onclick="switchView('calibration')" id="nav-calibration" class="nav-link">
+                    <i class="fas fa-sliders"></i>
+                    <span>Model Calibration</span>
+                </a>
+                <a href="javascript:void(0)" onclick="switchView('specs')" id="nav-specs" class="nav-link">
+                    <i class="fas fa-circle-info"></i>
+                    <span>System Architecture</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-foot">
+                <div class="sidebar-user" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    <span class="brand-logo" style="width:30px;height:30px;font-size:12px;background:var(--ink);">EH</span>
+                    <div>
+                        <div style="font-weight:600;font-size:.82rem;">Diagnostic Engineer</div>
+                        <div style="font-size:.68rem;color:var(--muted);">All-in-One Workspace</div>
+                    </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--muted);">
+                    <span>Node: <strong>ESP32-S3</strong></span>
+                    <span style="color:var(--ok);"><strong>● 50 Hz Live</strong></span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN WORKSPACE -->
+        <main class="main">
+            
+            <!-- STICKY TOPBAR -->
+            <header class="topbar">
+                <div class="breadcrumb">
+                    <span>EquipmentHealth Console</span>
+                    <i class="fas fa-chevron-right" style="font-size: 10px; color: var(--faint);"></i>
+                    <strong id="current-view-title">SCADA Overview &amp; Telemetry</strong>
+                </div>
+
+                <div class="topbar-actions">
+                    <!-- Fault Scenario Selector -->
+                    <select id="simScenario" onchange="changeScenario(this.value)" class="btn" style="padding: 6px 12px; font-size: 0.80rem; border-radius: 6px;">
+                        <option value="Normal Operation">🟢 Normal Operation (Healthy)</option>
+                        <option value="Rotor Imbalance">🟡 Rotor Imbalance (High Vibration)</option>
+                        <option value="Mechanical Overload">🔴 Mechanical Overload (High Current)</option>
+                        <option value="Bearing Overheating">🔴 Bearing Wear &amp; Thermal Runaway</option>
+                        <option value="Supply Voltage Sag">🟡 Power Supply Voltage Sag</option>
+                        <option value="Multi-Fault Critical">🚨 Multi-Fault Critical Cascade</option>
+                    </select>
+
+                    <button id="btn-stream" onclick="toggleStream()" class="btn btn-primary" style="padding: 6px 14px; font-size: 0.80rem;">
+                        <i class="fas fa-play" id="stream-icon"></i>
+                        <span id="stream-text">Streaming: ON</span>
+                    </button>
+
+                    <button onclick="stepSample()" class="btn" style="padding: 6px 12px; font-size: 0.80rem;">
+                        <i class="fas fa-rotate"></i>
+                        <span>Sample</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="content">
+
+                <!-- STATUS BANNER -->
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+                    <div>
+                        <h2 style="font-size: 1.55rem; margin-bottom: 4px;">RS-380 DC Motor Testbed</h2>
+                        <p style="margin: 0; font-size: 0.85rem; color: var(--muted);">
+                            12V Brushed DC Motor &middot; Station: <code>CELL-01</code> &middot; Sampling: <strong class="tnum">50 Hz Raw / 2 Hz MQTT</strong>
+                        </p>
+                    </div>
+                    <div id="system-status-pill" class="pill ok" style="padding: 6px 14px; font-size: 0.82rem;">
+                        <span class="pulse-dot" style="background: var(--ok);"></span>
+                        <span id="system-status-label">HEALTHY OPERATIONAL ENVELOPE</span>
+                    </div>
+                </div>
+
+                <!-- PERSISTENT HEADLINE KPI METRICS (Always visible) -->
+                <div class="metrics mb-5">
+                    <div class="metric" style="--m-accent: var(--ok)">
+                        <div class="metric-label"><i class="fas fa-heart-pulse"></i>Health Index (H)</div>
+                        <div class="metric-value tnum" id="kpi-health">0.962</div>
+                        <div class="metric-foot">Failure Limit: <strong>&le; 0.700</strong> &middot; <span id="kpi-health-status" style="color:var(--ok);font-weight:600;">Nominal</span></div>
+                    </div>
+
+                    <div class="metric" style="--m-accent: var(--info)">
+                        <div class="metric-label"><i class="fas fa-hourglass-half"></i>Remaining Useful Life</div>
+                        <div class="metric-value tnum" id="kpi-rul">8.73 <span style="font-size: .95rem; color: var(--muted); font-family: var(--font-body);">hrs</span></div>
+                        <div class="metric-foot" id="kpi-ci">95% CI: [7.10h – 10.36h]</div>
+                    </div>
+
+                    <div class="metric" style="--m-accent: var(--danger)">
+                        <div class="metric-label"><i class="fas fa-triangle-exclamation"></i>Primary Anomaly Driver</div>
+                        <div class="metric-value" style="font-size: 1.35rem; font-family: var(--font-body);" id="kpi-driver">Motor Current</div>
+                        <div class="metric-foot">SHAP Impact: <strong id="kpi-driver-pct" class="tnum">24.5%</strong></div>
+                    </div>
+
+                    <div class="metric" style="--m-accent: var(--accent)">
+                        <div class="metric-label"><i class="fas fa-ruler-combined"></i>RMS Deviation Score</div>
+                        <div class="metric-value tnum" id="kpi-rms">0.32 <span style="font-size: .95rem; color: var(--muted); font-family: var(--font-body);">σ</span></div>
+                        <div class="metric-foot">Healthy Envelope: <strong>&le; 0.50 σ</strong></div>
+                    </div>
+                </div>
+
+                <!-- SUBNAV TABS (Fast In-Page Switcher) -->
+                <div class="subnav-pills">
+                    <button onclick="switchView('live')" id="tab-live" class="subnav-btn is-active"><i class="fas fa-gauge-high"></i> Live Telemetry</button>
+                    <button onclick="switchView('prognostics')" id="tab-prognostics" class="subnav-btn"><i class="fas fa-chart-simple"></i> Prognostics &amp; SHAP</button>
+                    <button onclick="switchView('rca')" id="tab-rca" class="subnav-btn"><i class="fas fa-microscope"></i> Root Cause Diagnostics</button>
+                    <button onclick="switchView('copilot')" id="tab-copilot" class="subnav-btn"><i class="fas fa-comment-medical"></i> Maintenance Copilot</button>
+                    <button onclick="switchView('historian')" id="tab-historian" class="subnav-btn"><i class="fas fa-database"></i> Historian Log</button>
+                    <button onclick="switchView('calibration')" id="tab-calibration" class="subnav-btn"><i class="fas fa-sliders"></i> Sensor Calibration</button>
+                    <button onclick="switchView('specs')" id="tab-specs" class="subnav-btn"><i class="fas fa-circle-info"></i> Architecture Specs</button>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- SECTION 1: LIVE SCADA & TELEMETRY -->
+                <!-- ============================================================== -->
+                <div id="sec-live" class="tab-section is-active">
+                    
+                    <!-- 6-Sensor Telemetry Grid -->
+                    <div class="panel">
+                        <div class="panel-head">
+                            <h3 class="panel-title"><i class="fas fa-wave-square" style="color: var(--accent);"></i> Real-Time Telemetry Matrix</h3>
+                            <span class="tnum" style="font-size: 0.78rem; color: var(--muted);" id="syncTime">Synchronized: Just now</span>
+                        </div>
+
+                        <div class="sensor-grid">
+                            <div class="sensor-card">
+                                <div class="sensor-title">Battery Voltage</div>
+                                <div class="sensor-val"><span id="s-vbatt">12.21</span> <span style="font-size: 0.75rem; color: var(--muted);">V</span></div>
+                                <div class="sensor-delta" style="color: var(--ok);" id="d-vbatt">Δ +0.01 V</div>
+                            </div>
+
+                            <div class="sensor-card">
+                                <div class="sensor-title">Motor Voltage</div>
+                                <div class="sensor-val"><span id="s-vmot">11.82</span> <span style="font-size: 0.75rem; color: var(--muted);">V</span></div>
+                                <div class="sensor-delta" style="color: var(--ok);" id="d-vmot">Δ +0.02 V</div>
+                            </div>
+
+                            <div class="sensor-card">
+                                <div class="sensor-title">Total Current</div>
+                                <div class="sensor-val"><span id="s-itot">2.11</span> <span style="font-size: 0.75rem; color: var(--muted);">A</span></div>
+                                <div class="sensor-delta" style="color: var(--ok);" id="d-itot">Δ +0.01 A</div>
+                            </div>
+
+                            <div class="sensor-card">
+                                <div class="sensor-title">Motor Current (ACS715)</div>
+                                <div class="sensor-val"><span id="s-imot">1.86</span> <span style="font-size: 0.75rem; color: var(--muted);">A</span></div>
+                                <div class="sensor-delta" style="color: var(--ok);" id="d-imot">Δ +0.01 A</div>
+                            </div>
+
+                            <div class="sensor-card">
+                                <div class="sensor-title">Casing Temp (DS18B20)</div>
+                                <div class="sensor-val"><span id="s-temp">38.2</span> <span style="font-size: 0.75rem; color: var(--muted);">°C</span></div>
+                                <div class="sensor-delta" style="color: var(--ok);" id="d-temp">Δ +0.2 °C</div>
+                            </div>
+
+                            <div class="sensor-card">
+                                <div class="sensor-title">801S Vibration</div>
+                                <div class="sensor-val"><span id="s-vib">0.354</span> <span style="font-size: 0.75rem; color: var(--muted);">g</span></div>
+                                <div class="sensor-delta" style="color: var(--ok);" id="d-vib">Δ +0.004 g</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dual Plot Grid: Trajectory & Oscilloscope -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 20px;">
+                        
+                        <div class="panel">
+                            <div class="panel-head">
+                                <h3 class="panel-title"><i class="fas fa-chart-area" style="color: var(--ok);"></i> Health Index Degradation Trajectory</h3>
+                                <span class="pill ok" id="healthPill">Status: Nominal</span>
+                            </div>
+                            <div style="position: relative; height: 260px; width: 100%;">
+                                <canvas id="chart-trajectory"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <div class="panel-head">
+                                <h3 class="panel-title"><i class="fas fa-chart-line" style="color: var(--info);"></i> Telemetry Oscilloscope Stream</h3>
+                                <span style="font-size: 0.78rem; color: var(--muted);">Motor Current (A) &amp; Vibration (g)</span>
+                            </div>
+                            <div style="position: relative; height: 260px; width: 100%;">
+                                <canvas id="chart-oscilloscope"></canvas>
+                            </div>
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- SECTION 2: PROGNOSTICS & SHAP -->
+                <!-- ============================================================== -->
+                <div id="sec-prognostics" class="tab-section">
+                    <div style="display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; margin-bottom: 24px;">
+                        
+                        <!-- Ranked SHAP Baseline Bars -->
+                        <div class="panel">
+                            <div class="panel-head">
+                                <h3 class="panel-title"><i class="fas fa-scale-balanced" style="color: var(--accent);"></i> SHAP Feature Attribution</h3>
+                                <span class="text-xs" style="color:var(--faint)">Ranked by anomaly contribution</span>
+                            </div>
+                            <div id="shap-bar-container" style="padding: 10px 4px;">
+                                <!-- Dynamically populated by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Mathematical Formulation Card -->
+                        <div class="panel">
+                            <div class="panel-head">
+                                <h3 class="panel-title"><i class="fas fa-square-root-variable" style="color: var(--info);"></i> Prognostic Equations &amp; 95% Confidence Bounds</h3>
+                            </div>
+                            <div style="font-size: 0.88rem; line-height: 1.7; color: var(--ink);">
+                                <p><strong>1. Health Index ($H$):</strong><br>
+                                $H = 1 - \sqrt{\sum_{i=1}^n w_i \left(\frac{x_i - \mu_i}{\sigma_i}\right)^2} \times 0.12$, bounded in $[0.0, 1.0]$.</p>
+                                
+                                <p><strong>2. Remaining Useful Life ($RUL$):</strong><br>
+                                $\text{RUL} = L_0 \times \frac{H - H_{\text{fail}}}{H_0 - H_{\text{fail}}}$, with $L_0 = 10.0\text{ hrs}$, $H_{\text{fail}} = 0.70$, $H_0 = 1.00$.</p>
+                                
+                                <p><strong>3. Uncertainty Bounds (95% CI):</strong><br>
+                                $\text{Interval} = \text{RUL} \pm 1.96 \times \sigma_{\text{RUL}}$, where $\sigma_{\text{RUL}} \approx \pm 1.63\text{ hrs}$.</p>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- SECTION 3: ROOT CAUSE ANALYSIS (RCA) -->
+                <!-- ============================================================== -->
+                <div id="sec-rca" class="tab-section">
+                    <div style="display: grid; grid-template-columns: 1fr 1.3fr; gap: 24px;">
+                        
+                        <div class="panel">
+                            <div class="panel-head">
+                                <h3 class="panel-title"><i class="fas fa-crosshairs" style="color: var(--danger);"></i> 6-Axis Z-Score Profile</h3>
+                            </div>
+                            <div style="position: relative; height: 320px; width: 100%;">
+                                <canvas id="chart-radar"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <div class="panel-head">
+                                <h3 class="panel-title"><i class="fas fa-list-check" style="color: var(--ok);"></i> Parameter Deviation Ledger</h3>
+                            </div>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Parameter</th>
+                                        <th>Measured</th>
+                                        <th>Baseline (μ ± σ)</th>
+                                        <th>Z-Score</th>
+                                        <th>Evaluation</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="anomaly-table-body">
+                                    <!-- Populated via JS -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- SECTION 4: AI MAINTENANCE COPILOT -->
+                <!-- ============================================================== -->
+                <div id="sec-copilot" class="tab-section">
+                    <div class="panel" style="max-width: 960px; margin: 0 auto;">
+                        <div class="panel-head">
+                            <h3 class="panel-title"><i class="fas fa-user-doctor" style="color: var(--accent);"></i> Industrial Maintenance Copilot</h3>
+                            <span class="pill ok">Context-Grounded Engine Active</span>
+                        </div>
+                        
+                        <div id="copilot-brief" style="background: var(--surface-alt); padding: 20px; border-radius: var(--radius); border: 1px solid var(--border); font-size: 0.92rem; line-height: 1.7; margin-bottom: 20px;">
+                            <!-- Diagnostic Brief injected here -->
+                        </div>
+
+                        <div style="display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;">
+                            <button onclick="askCopilot('root-cause')" class="btn"><i class="fas fa-magnifying-glass"></i> Root Cause Breakdown</button>
+                            <button onclick="askCopilot('rul')" class="btn"><i class="fas fa-stopwatch"></i> Verify RUL &amp; Uncertainty</button>
+                            <button onclick="askCopilot('safety')" class="btn"><i class="fas fa-triangle-exclamation"></i> Emergency Safety Audit</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- SECTION 5: DATA HISTORIAN LOG (SQLite) -->
+                <!-- ============================================================== -->
+                <div id="sec-historian" class="tab-section">
+                    <div class="panel">
+                        <div class="panel-head">
+                            <h3 class="panel-title"><i class="fas fa-clock-rotate-left" style="color: var(--info);"></i> Telemetry Historian Log</h3>
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs" style="color:var(--faint)" id="logCount">5 recorded events</span>
+                                <button onclick="exportCSV()" class="btn btn-primary"><i class="fas fa-download"></i> Export CSV</button>
+                            </div>
+                        </div>
+                        <div style="max-height: 420px; overflow-y: auto;">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Timestamp</th>
+                                        <th>Operating Mode</th>
+                                        <th>Health (H)</th>
+                                        <th>RUL (h)</th>
+                                        <th>Motor Current</th>
+                                        <th>Vibration</th>
+                                        <th>Temperature</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="historian-table-body">
+                                    <!-- Log rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- SECTION 6: SENSOR BASELINE CALIBRATION -->
+                <!-- ============================================================== -->
+                <div id="sec-calibration" class="tab-section">
+                    <div class="panel" style="max-width: 860px; margin: 0 auto;">
+                        <div class="panel-head">
+                            <h3 class="panel-title"><i class="fas fa-sliders" style="color: var(--accent);"></i> Sensor Baseline Calibration Profiles</h3>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Sensor</th>
+                                    <th>Baseline Mean (μ)</th>
+                                    <th>Baseline Std (σ)</th>
+                                    <th>Normalized Weight (w)</th>
+                                    <th>Hardware Transducer</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td><strong>Battery Voltage</strong></td><td>12.20 V</td><td>0.12 V</td><td>5%</td><td>Resistor Divider (10k/2.2k)</td></tr>
+                                <tr><td><strong>Motor Voltage</strong></td><td>11.80 V</td><td>0.15 V</td><td>15%</td><td>Resistor Divider (10k/2.2k)</td></tr>
+                                <tr><td><strong>Total Current</strong></td><td>2.10 A</td><td>0.10 A</td><td>5%</td><td>ACS715-20A Module 1</td></tr>
+                                <tr><td><strong>Motor Current</strong></td><td>1.85 A</td><td>0.08 A</td><td>25%</td><td>ACS715-20A Module 2</td></tr>
+                                <tr><td><strong>Casing Temp</strong></td><td>38.00 °C</td><td>1.20 °C</td><td>25%</td><td>DS18B20 1-Wire Probe</td></tr>
+                                <tr><td><strong>801S Vibration</strong></td><td>0.35 g</td><td>0.05 g</td><td>25%</td><td>801S Analog Vibration Transducer</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- SECTION 7: SYSTEM ARCHITECTURE SPECS -->
+                <!-- ============================================================== -->
+                <div id="sec-specs" class="tab-section">
+                    <div class="panel" style="max-width: 900px; margin: 0 auto;">
+                        <div class="panel-head">
+                            <h3 class="panel-title"><i class="fas fa-diagram-project" style="color: var(--info);"></i> End-to-End System Architecture</h3>
+                        </div>
+                        <div style="font-size: 0.90rem; line-height: 1.7; color: var(--ink-strong);">
+                            <p><strong>Physical Layer:</strong> RS-380 DC motor (12V, 6000 RPM) powered via 3S LiPo battery, monitored with dual current sensing (system and motor branches), temperature, and vibration.</p>
+                            <p><strong>IIoT Edge Node:</strong> ESP32 microcontroller acquiring analog/digital telemetry at 50 Hz, windowing statistics, and publishing JSON payloads over Wi-Fi (MQTT/HTTP) at 2 Hz.</p>
+                            <p><strong>Prognostics Layer:</strong> Baseline-normalized RMS Mahalanobis-like health scoring with 95% statistical prediction intervals and SHAP-like feature contributions.</p>
+                            <p><strong>Interface:</strong> Single-page responsive SCADA console with real-time digital twin visualization, root cause radar diagnostics, and AI-assisted maintenance playbooks.</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC ENGINE -->
+    <script>
+        const BASELINES = {
+            battery_voltage: { name: "Battery Voltage", mean: 12.20, std: 0.12, unit: "V", weight: 0.05 },
+            motor_voltage:   { name: "Motor Voltage", mean: 11.80, std: 0.15, unit: "V", weight: 0.15 },
+            total_current:   { name: "Total Current", mean: 2.10, std: 0.10, unit: "A", weight: 0.05 },
+            motor_current:   { name: "Motor Current", mean: 1.85, std: 0.08, unit: "A", weight: 0.25 },
+            temperature:     { name: "Temperature", mean: 38.00, std: 1.20, unit: "°C", weight: 0.25 },
+            vibration:       { name: "Vibration", mean: 0.35, std: 0.05, unit: "g", weight: 0.25 }
+        };
+
+        const NOMINAL_L0 = 10.0;
+        const H_FAIL = 0.70;
+        const H0 = 1.00;
+
+        let activeScenario = "Normal Operation";
+        let isStreaming = true;
+        let streamTimer = null;
+        let auditLog = [];
+
+        // Single-Page View Switcher
+        function switchView(viewId) {
+            document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('is-active'));
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            document.querySelectorAll('.subnav-btn').forEach(b => b.classList.remove('is-active'));
+
+            const sec = document.getElementById(`sec-${viewId}`);
+            if (sec) sec.classList.add('is-active');
+
+            const nav = document.getElementById(`nav-${viewId}`);
+            if (nav) nav.classList.add('active');
+
+            const tab = document.getElementById(`tab-${viewId}`);
+            if (tab) tab.classList.add('is-active');
+
+            const titles = {
+                live: "SCADA Overview & Telemetry",
+                prognostics: "Prognostics & SHAP Attribution",
+                rca: "Root Cause Diagnostics",
+                copilot: "Maintenance Copilot",
+                historian: "Telemetry Historian Log",
+                calibration: "Sensor Baseline Calibration",
+                specs: "System Architecture Specs"
+            };
+            document.getElementById('current-view-title').innerText = titles[viewId] || "SCADA Console";
+        }
+
+        // Chart.js Theme Initialization
+        Chart.defaults.color = '#52565e';
+        Chart.defaults.font.family = "'Inter', sans-serif";
+
+        const ctxTrajectory = document.getElementById('chart-trajectory').getContext('2d');
+        const chartTrajectory = new Chart(ctxTrajectory, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Health Index (H)',
+                        data: [],
+                        borderColor: '#2f6b46',
+                        backgroundColor: 'rgba(47, 107, 70, 0.08)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.2,
+                        pointRadius: 3
+                    },
+                    {
+                        label: 'Critical Threshold (0.70)',
+                        data: [],
+                        borderColor: '#b3271e',
+                        borderWidth: 1.5,
+                        borderDash: [4, 4],
+                        fill: false,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { min: 0.4, max: 1.05, grid: { color: '#e4e2dd' } },
+                    x: { grid: { color: '#e4e2dd' } }
+                },
+                plugins: { legend: { position: 'top' } }
+            }
+        });
+
+        const ctxOsc = document.getElementById('chart-oscilloscope').getContext('2d');
+        const chartOsc = new Chart(ctxOsc, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Motor Current (A)',
+                        data: [],
+                        borderColor: '#b4441f',
+                        borderWidth: 2,
+                        tension: 0.2,
+                        pointRadius: 0,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Vibration (g)',
+                        data: [],
+                        borderColor: '#2c5282',
+                        borderWidth: 2,
+                        tension: 0.2,
+                        pointRadius: 0,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { position: 'left', grid: { color: '#e4e2dd' }, title: { display: true, text: 'Current (A)' } },
+                    y1: { position: 'right', grid: { display: false }, title: { display: true, text: 'Vibration (g)' } },
+                    x: { display: false }
+                }
+            }
+        });
+
+        const ctxRadar = document.getElementById('chart-radar').getContext('2d');
+        const chartRadar = new Chart(ctxRadar, {
+            type: 'radar',
+            data: {
+                labels: ['Batt V', 'Mot V', 'Tot I', 'Mot I', 'Temp', 'Vib'],
+                datasets: [{
+                    label: 'Current Deviation (Z-Score)',
+                    data: [0, 0, 0, 0, 0, 0],
+                    backgroundColor: 'rgba(180, 68, 31, 0.2)',
+                    borderColor: '#b4441f',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    r: { min: 0, max: 4, grid: { color: '#e4e2dd' }, angleLines: { color: '#e4e2dd' } }
+                }
+            }
+        });
+
+        function calculateMetrics() {
+            let biases = { battery_voltage: 0, motor_voltage: 0, total_current: 0, motor_current: 0, temperature: 0, vibration: 0 };
+
+            if (activeScenario.includes("Imbalance")) {
+                biases.vibration = 0.45 + Math.random() * 0.35;
+                biases.motor_current = 0.20 + Math.random() * 0.15;
+            } else if (activeScenario.includes("Overload")) {
+                biases.motor_current = 1.45 + Math.random() * 1.0;
+                biases.total_current = biases.motor_current + 0.15;
+                biases.motor_voltage = -1.2;
+                biases.temperature = 12.0;
+            } else if (activeScenario.includes("Bearing")) {
+                biases.temperature = 26.0 + Math.random() * 12.0;
+                biases.vibration = 0.22 + Math.random() * 0.10;
+                biases.motor_current = 0.35;
+            } else if (activeScenario.includes("Voltage Sag")) {
+                biases.battery_voltage = -2.5;
+                biases.motor_voltage = -2.8;
+                biases.motor_current = -0.3;
+            } else if (activeScenario.includes("Critical")) {
+                biases.vibration = 0.65 + Math.random() * 0.30;
+                biases.motor_current = 1.80 + Math.random() * 0.80;
+                biases.temperature = 32.0;
+                biases.motor_voltage = -1.5;
+            }
+
+            let telemetry = {};
+            let weightedDevs = {};
+            let totalDev = 0;
+            let zList = [];
+
+            for (let [k, p] of Object.entries(BASELINES)) {
+                let noise = (Math.random() - 0.5) * 2 * (p.std * 0.75);
+                let val = Math.max(0.01, p.mean + biases[k] + noise);
+                telemetry[k] = Number(val.toFixed(3));
+
+                let z = Math.abs((val - p.mean) / p.std);
+                zList.push(Number(z.toFixed(2)));
+                let wdev = p.weight * Math.pow((val - p.mean) / p.std, 2);
+                weightedDevs[k] = wdev;
+                totalDev += wdev;
+            }
+
+            let rms = Math.sqrt(totalDev);
+            let health = Math.max(0.0, Math.min(1.0, 1.0 - (rms * 0.12)));
+            let rul = health > H_FAIL ? NOMINAL_L0 * ((health - H_FAIL) / (H0 - H_FAIL)) : (health / H_FAIL) * 0.5;
+            let rulLow = Math.max(0, rul - 1.63);
+            let rulHigh = rul + 1.63;
+
+            let contribs = {};
+            let topKey = "motor_current";
+            let maxPct = 0;
+
+            for (let [k, dev] of Object.entries(weightedDevs)) {
+                let pct = totalDev > 0 ? (dev / totalDev) * 100 : 16.6;
+                contribs[k] = Number(pct.toFixed(1));
+                if (pct > maxPct) {
+                    maxPct = pct;
+                    topKey = k;
+                }
+            }
+
+            return {
+                telemetry,
+                health: Number(health.toFixed(3)),
+                rul: Number(rul.toFixed(2)),
+                rulLow: Number(rulLow.toFixed(2)),
+                rulHigh: Number(rulHigh.toFixed(2)),
+                rms: Number(rms.toFixed(2)),
+                contribs,
+                topKey,
+                topPct: Number(maxPct.toFixed(1)),
+                zList
+            };
+        }
+
+        function updateDisplay(res) {
+            // Update Headline Metrics
+            document.getElementById('kpi-health').innerText = res.health.toFixed(3);
+            document.getElementById('kpi-rul').innerHTML = `${res.rul.toFixed(2)} <span style="font-size: .95rem; color: var(--muted); font-family: var(--font-body);">hrs</span>`;
+            document.getElementById('kpi-ci').innerText = `95% CI: [${res.rulLow.toFixed(2)}h – ${res.rulHigh.toFixed(2)}h]`;
+            document.getElementById('kpi-driver').innerText = BASELINES[res.topKey].name;
+            document.getElementById('kpi-driver-pct').innerText = `${res.topPct}%`;
+            document.getElementById('kpi-rms').innerHTML = `${res.rms.toFixed(2)} <span style="font-size: .95rem; color: var(--muted); font-family: var(--font-body);">σ</span>`;
+
+            // Status Pill
+            const pill = document.getElementById('system-status-pill');
+            const lbl = document.getElementById('system-status-label');
+            const healthStatus = document.getElementById('kpi-health-status');
+            const healthPill = document.getElementById('healthPill');
+
+            if (res.health >= 0.85) {
+                pill.className = "pill ok";
+                lbl.innerText = "HEALTHY OPERATIONAL ENVELOPE";
+                healthStatus.style.color = "var(--ok)";
+                healthStatus.innerText = "Nominal";
+                healthPill.className = "pill ok";
+                healthPill.innerText = "Status: Nominal";
+            } else if (res.health >= 0.70) {
+                pill.className = "pill hazard";
+                lbl.innerText = "WARNING: DEGRADATION DETECTED";
+                healthStatus.style.color = "var(--hazard)";
+                healthStatus.innerText = "Degraded";
+                healthPill.className = "pill hazard";
+                healthPill.innerText = "Status: Warning";
+            } else {
+                pill.className = "pill danger";
+                lbl.innerText = "CRITICAL: THRESHOLD BREACHED";
+                healthStatus.style.color = "var(--danger)";
+                healthStatus.innerText = "Trip Risk";
+                healthPill.className = "pill danger";
+                healthPill.innerText = "Status: Critical";
+            }
+
+            // Update 6 Sensors
+            document.getElementById('s-vbatt').innerText = res.telemetry.battery_voltage.toFixed(2);
+            document.getElementById('s-vmot').innerText = res.telemetry.motor_voltage.toFixed(2);
+            document.getElementById('s-itot').innerText = res.telemetry.total_current.toFixed(2);
+            document.getElementById('s-imot').innerText = res.telemetry.motor_current.toFixed(2);
+            document.getElementById('s-temp').innerText = res.telemetry.temperature.toFixed(1);
+            document.getElementById('s-vib').innerText = res.telemetry.vibration.toFixed(3);
+
+            let dVb = res.telemetry.battery_voltage - BASELINES.battery_voltage.mean;
+            let dVm = res.telemetry.motor_voltage - BASELINES.motor_voltage.mean;
+            let dIt = res.telemetry.total_current - BASELINES.total_current.mean;
+            let dIm = res.telemetry.motor_current - BASELINES.motor_current.mean;
+            let dTe = res.telemetry.temperature - BASELINES.temperature.mean;
+            let dVi = res.telemetry.vibration - BASELINES.vibration.mean;
+
+            document.getElementById('d-vbatt').innerText = `Δ ${dVb >= 0 ? '+' : ''}${dVb.toFixed(2)} V`;
+            document.getElementById('d-vmot').innerText = `Δ ${dVm >= 0 ? '+' : ''}${dVm.toFixed(2)} V`;
+            document.getElementById('d-itot').innerText = `Δ ${dIt >= 0 ? '+' : ''}${dIt.toFixed(2)} A`;
+            document.getElementById('d-imot').innerText = `Δ ${dIm >= 0 ? '+' : ''}${dIm.toFixed(2)} A`;
+            document.getElementById('d-temp').innerText = `Δ ${dTe >= 0 ? '+' : ''}${dTe.toFixed(1)} °C`;
+            document.getElementById('d-vib').innerText = `Δ ${dVi >= 0 ? '+' : ''}${dVi.toFixed(3)} g`;
+
+            let nowStr = new Date().toLocaleTimeString();
+            document.getElementById('syncTime').innerText = `Synchronized: ${nowStr}`;
+
+            if (chartTrajectory.data.labels.length > 20) {
+                chartTrajectory.data.labels.shift();
+                chartTrajectory.data.datasets[0].data.shift();
+                chartTrajectory.data.datasets[1].data.shift();
+
+                chartOsc.data.labels.shift();
+                chartOsc.data.datasets[0].data.shift();
+                chartOsc.data.datasets[1].data.shift();
+            }
+
+            chartTrajectory.data.labels.push(nowStr);
+            chartTrajectory.data.datasets[0].data.push(res.health);
+            chartTrajectory.data.datasets[1].data.push(0.70);
+            chartTrajectory.update('none');
+
+            chartOsc.data.labels.push(nowStr);
+            chartOsc.data.datasets[0].data.push(res.telemetry.motor_current);
+            chartOsc.data.datasets[1].data.push(res.telemetry.vibration);
+            chartOsc.update('none');
+
+            // Update SHAP Baseline Bars
+            let shapHTML = "";
+            for (let [k, p] of Object.entries(BASELINES)) {
+                let pct = res.contribs[k] || 0;
+                shapHTML += `
+                <div class="bar-row">
+                    <span class="bar-name">${p.name}</span>
+                    <span class="bar-track">
+                        <span class="bar-fill" style="width: ${pct}%;"></span>
+                    </span>
+                    <span class="bar-val">${pct}%</span>
+                </div>
+                `;
+            }
+            document.getElementById('shap-bar-container').innerHTML = shapHTML;
+
+            // Update Radar Chart
+            chartRadar.data.datasets[0].data = res.zList;
+            chartRadar.update('none');
+
+            // Update Anomaly Ledger Table
+            let tableHTML = "";
+            for (let [k, p] of Object.entries(BASELINES)) {
+                let val = res.telemetry[k];
+                let z = Math.abs((val - p.mean) / p.std);
+                let stBadge = z > 3 ? '<span class="pill danger">Critical Outlier</span>' : (z > 1.8 ? '<span class="pill hazard">Moderate Deviation</span>' : '<span class="pill ok">Nominal</span>');
+                tableHTML += `
+                <tr>
+                    <td><strong>${p.name}</strong></td>
+                    <td class="tnum">${val.toFixed(2)} ${p.unit}</td>
+                    <td class="tnum">${p.mean.toFixed(2)} ± ${p.std.toFixed(2)}</td>
+                    <td class="tnum">${z.toFixed(2)}σ</td>
+                    <td>${stBadge}</td>
+                </tr>
+                `;
+            }
+            document.getElementById('anomaly-table-body').innerHTML = tableHTML;
+
+            // Update Copilot Brief
+            document.getElementById('copilot-brief').innerHTML = `
+            <div style="font-weight: 600; color: var(--ink); margin-bottom: 8px;">
+                <i class="fas fa-stethoscope" style="color: var(--accent); margin-right: 6px;"></i> Live Diagnostic Assessment:
+            </div>
+            Equipment health index is measured at <strong>${res.health}</strong> with an estimated remaining operating life of <strong>${res.rul} hours</strong> (95% CI: [${res.rulLow}h – ${res.rulHigh}h]). 
+            Primary anomaly driver is <strong>${BASELINES[res.topKey].name}</strong> accounting for <strong>${res.topPct}%</strong> of deviation.
+            `;
+
+            // Append to Historian Log
+            auditLog.unshift({
+                timestamp: nowStr,
+                mode: activeScenario,
+                health: res.health,
+                rul: res.rul,
+                motor_i: res.telemetry.motor_current,
+                vibration: res.telemetry.vibration,
+                temp: res.telemetry.temperature
+            });
+            if (auditLog.length > 50) auditLog.pop();
+
+            let histHTML = "";
+            auditLog.forEach(row => {
+                let evalBadge = row.health >= 0.85 ? '<span class="pill ok">Nominal</span>' : (row.health >= 0.70 ? '<span class="pill hazard">Warning</span>' : '<span class="pill danger">Critical</span>');
+                histHTML += `
+                <tr>
+                    <td class="tnum">${row.timestamp}</td>
+                    <td><span class="pill info" style="font-size:.70rem">${row.mode}</span></td>
+                    <td class="tnum"><strong>${row.health.toFixed(3)}</strong></td>
+                    <td class="tnum">${row.rul.toFixed(2)}h</td>
+                    <td class="tnum">${row.motor_i.toFixed(2)}A</td>
+                    <td class="tnum">${row.vibration.toFixed(3)}g</td>
+                    <td class="tnum">${row.temp.toFixed(1)}°C</td>
+                    <td>${evalBadge}</td>
+                </tr>
+                `;
+            });
+            document.getElementById('historian-table-body').innerHTML = histHTML;
+            document.getElementById('logCount').innerText = `${auditLog.length} recorded events`;
+        }
+
+        function stepSample() {
+            let res = calculateMetrics();
+            updateDisplay(res);
+        }
+
+        function changeScenario(val) {
+            activeScenario = val;
+            stepSample();
+        }
+
+        function toggleStream() {
+            isStreaming = !isStreaming;
+            const btn = document.getElementById('btn-stream');
+            const txt = document.getElementById('stream-text');
+            const icon = document.getElementById('stream-icon');
+
+            if (isStreaming) {
+                txt.innerText = "Streaming: ON";
+                icon.className = "fas fa-play";
+                btn.className = "btn btn-primary";
+                streamTimer = setInterval(stepSample, 1800);
+            } else {
+                txt.innerText = "Streaming: PAUSED";
+                icon.className = "fas fa-pause";
+                btn.className = "btn";
+                clearInterval(streamTimer);
+            }
+        }
+
+        function askCopilot(type) {
+            let res = calculateMetrics();
+            const brief = document.getElementById('copilot-brief');
+            if (type === 'root-cause') {
+                brief.innerHTML = `<p><strong>🔍 Root Cause Analysis:</strong> Primary anomaly is concentrated in <strong>${BASELINES[res.topKey].name}</strong> (${res.topPct}% variance impact). Recommended action: Inspect shaft coupling alignment, brush spark intensity, and bearing clearances.</p>`;
+            } else if (type === 'rul') {
+                brief.innerHTML = `<p><strong>⏱️ Prognostic Verification:</strong> At current degradation rate, Remaining Useful Life is estimated at <strong>${res.rul} hours</strong> within confidence bounds [${res.rulLow}h – ${res.rulHigh}h].</p>`;
+            } else if (type === 'safety') {
+                if (res.health < 0.70) {
+                    brief.innerHTML = `<p style="color: var(--danger);"><strong>🚨 EMERGENCY SAFETY ALERT:</strong> Health index ($H = ${res.health}$) has breached critical safety threshold 0.70. Recommend de-energizing motor to prevent mechanical failure.</p>`;
+                } else {
+                    brief.innerHTML = `<p style="color: var(--ok);"><strong>✅ Safety Confirmed:</strong> Motor operation is within permissible safety envelopes ($H = ${res.health} \\ge 0.70$).</p>`;
+                }
+            }
+        }
+
+        function exportCSV() {
+            let csv = "Timestamp,Operating Mode,Health Index,RUL (hrs),Motor Current (A),Vibration (g),Temperature (C)\n";
+            auditLog.forEach(r => {
+                csv += `"${r.timestamp}","${r.mode}",${r.health},${r.rul},${r.motor_i},${r.vibration},${r.temp}\n`;
+            });
+            let blob = new Blob([csv], { type: 'text/csv' });
+            let url = window.URL.createObjectURL(blob);
+            let a = document.createElement('a');
+            a.setAttribute('href', url);
+            a.setAttribute('download', `rs380_telemetry_audit_${new Date().getTime()}.csv`);
+            a.click();
+        }
+
+        // Initialize 5 data points
+        for(let i=0; i<5; i++) {
+            stepSample();
+        }
+        streamTimer = setInterval(stepSample, 1800);
+    </script>
+</body>
+</html>

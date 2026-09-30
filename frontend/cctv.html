@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Cameras — SafetyFirst Admin</title>
+    <meta name="description" content="Live view from the site CCTV cameras.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/app.css?v=20260807a">
+    <style>
+        .cam-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+        .cam-frame {
+            position: relative;
+            border-radius: var(--radius);
+            overflow: hidden;
+            aspect-ratio: 4 / 3;
+            background: #0b0b0d;
+            border: 1px solid var(--border);
+        }
+        .cam-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .cam-empty {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 10px; color: var(--faint); text-align: center; padding: 0 20px; font-size: .84rem;
+        }
+        .cam-frame.is-stale img { opacity: .35; filter: grayscale(1); }
+        .cam-meta { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 10px; font-size: .78rem; color: var(--muted); }
+        .cam-id { font-weight: 600; color: var(--ink, inherit); letter-spacing: .01em; }
+        .badge.is-live i.fa-video { animation: pulse-dot 1.8s ease-in-out infinite; }
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+        @media (prefers-reduced-motion: reduce) { .badge.is-live i.fa-video { animation: none; } }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <main class="main">
+            <div class="content">
+
+                <section class="card mb-5">
+                    <div class="card-head">
+                        <span class="card-title"><i class="fas fa-video"></i>Live View</span>
+                        <span class="badge badge-muted" id="overallBadge"><i class="fas fa-circle-question"></i>Checking…</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="cam-grid" id="camGrid">
+                            <p class="text-muted" id="noCams" style="font-size:.85rem">Looking for cameras…</p>
+                        </div>
+
+                        <div class="flex items-center justify-between gap-3 flex-wrap" style="margin-top:18px">
+                            <div class="flex items-center gap-2">
+                                <button id="toggleBtn" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-pause"></i><span>Pause</span>
+                                </button>
+                                <button id="rescanBtn" class="btn btn-ghost btn-sm">
+                                    <i class="fas fa-rotate"></i>Rescan
+                                </button>
+                            </div>
+                            <label class="flex items-center gap-2" style="font-size:.82rem;color:var(--muted)">
+                                Refresh
+                                <select id="rateSelect" class="input input-sm" style="width:auto">
+                                    <option value="live" selected>Live</option>
+                                    <option value="200">5 / sec</option>
+                                    <option value="350">3 / sec</option>
+                                    <option value="1000">1 / sec</option>
+                                    <option value="5000">Every 5s</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        <p class="text-muted" style="font-size:.8rem;margin-top:14px">
+                            Frames are relayed through the backend, so the cameras never have to be
+                            reachable from your browser — only from the gate device beside them.
+                            This is a monitoring view: it runs no PPE detection and raises no records.
+                        </p>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <script src="js/config.js?v=20260807a"></script>
+    <script src="js/auth.js?v=20260807a"></script>
+    <script src="js/shell.js?v=20260807a"></script>
+    <script src="js/chatbot.js?v=20260807a"></script>
+    <script>
+        Auth.requireAdmin();
+        Shell.render('cctv', {
+            title: 'Site Cameras',
+            subtitle: 'Live view from the cameras watching the site',
+        });
+
+        const el = (id) => document.getElementById(id);
+
+        // A frame older than this means the feed has stopped even though
+        // the page is still running — worth showing, because a frozen
+        // picture otherwise looks like a very still yard.
+        const STALE_MS = 8000;
+        // How often we re-ask which cameras exist, so one appearing later
+        // shows up without a reload.
+        const RESCAN_MS = 20000;
+
+        let running = true;
+        const cams = new Map();   // id -> Camera
+
+        function rate() { return parseInt(el('rateSelect').value, 10) || 350; }
+
+        // "Live" reads a pushed stream instead of asking for one picture at
+        // a time. Same authentication either way: fetch() carries the
+        // header, which an <img src> could not, so no token goes near a URL.
+        function isLive() { return el('rateSelect').value === 'live'; }
+
+        // CR LF CR LF, spelled by code point so no escaping stage can
+        // mangle it on the way into this file.
+        const CRLF2 = String.fromCharCode(13, 10, 13, 10);
+
+        function concatBytes(a, b) {
+            const out = new Uint8Array(a.length + b.length);
+            out.set(a, 0); out.set(b, a.length);
+            return out;
+        }
+
+        // Index of `needle` (a short ASCII string) in a byte array.
+        function findBytes(hay, needle, from) {
+            const n = needle.length;
+            outer: for (let i = from | 0; i <= hay.length - n; i++) {
+                for (let j = 0; j < n; j++) {
+                    if (hay[i + j] !== needle.charCodeAt(j)) continue outer;
+                }
+                return i;
+            }
+            return -1;
+        }
+
+        function setOverall() {
+            const all = [...cams.values()];
+            const live = all.filter(c => c.live).length;
+            const b = el('overallBadge');
+            if (!all.length) {
+                b.className = 'badge badge-muted';
+                b.innerHTML = '<i class="fas fa-video-slash"></i>No cameras';
+            } else if (!running) {
+                b.className = 'badge badge-muted';
+                b.innerHTML = '<i class="fas fa-pause"></i>Paused';
+            } else if (live === all.length) {
+                b.className = 'badge badge-ok is-live';
+                b.innerHTML = `<i class="fas fa-video"></i>${live} live`;
+            } else {
+                b.className = live ? 'badge badge-warn' : 'badge badge-danger';
+                b.innerHTML = `<i class="fas fa-video"></i>${live} of ${all.length} live`;
+            }
+        }
+
+        class Camera {
+            constructor(info) {
+                this.id = info.id;
+                this.mode = info.mode;
+                this.live = false;
+                this.lastAt = 0;
+                this.frames = 0;
+                this.errors = 0;
+                this.objectUrl = null;   // revoked on replace; leaking one
+                                         // per frame exhausts memory fast
+                this.timer = null;
+                this.reader = null;
+                this.stopped = false;
+                this.build();
+            }
+
+            build() {
+                const wrap = document.createElement('div');
+                wrap.innerHTML = `
+                    <div class="cam-frame" id="frame-${this.id}">
+                        <img id="img-${this.id}" alt="Live view from ${this.id}" hidden>
+                        <div class="cam-empty" id="empty-${this.id}">
+                            <i class="fas fa-video-slash" style="font-size:1.3rem"></i>
+                            <span>Connecting…</span>
+                        </div>
+                    </div>
+                    <div class="cam-meta">
+                        <span class="cam-id"><i class="fas fa-circle" style="font-size:.5rem;vertical-align:middle"></i> ${this.id}</span>
+                        <span id="meta-${this.id}">—</span>
+                    </div>`;
+                el('camGrid').appendChild(wrap);
+                this.wrap = wrap;
+            }
+
+            destroy() {
+                this.stop();
+                if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+                this.wrap.remove();
+            }
+
+            paint(blob) {
+                const next = URL.createObjectURL(blob);
+                const img = el(`img-${this.id}`);
+                img.src = next;
+                img.hidden = false;
+                el(`empty-${this.id}`).hidden = true;
+                if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+                this.objectUrl = next;
+
+                this.lastAt = Date.now();
+                this.frames += 1;
+                this.errors = 0;
+                this.live = true;
+            }
+
+            // Read multipart/x-mixed-replace off a streaming fetch. The
+            // server ends each connection after a couple of minutes so a
+            // forgotten tab cannot hold a worker thread, so this reconnects
+            // until the mode changes or the page is paused.
+            async streamLoop() {
+                while (running && isLive() && !this.stopped) {
+                    try {
+                        const res = await Auth.fetch(
+                            `/api/cctv/stream?id=${encodeURIComponent(this.id)}`);
+                        if (!res.ok || !res.body) throw new Error(String(res.status));
+
+                        const reader = res.body.getReader();
+                        this.reader = reader;
+                        let buf = new Uint8Array(0);
+                        const dec = new TextDecoder();
+
+                        while (running && isLive() && !this.stopped) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            buf = concatBytes(buf, value);
+
+                            // Drain every complete part currently buffered;
+                            // one read can carry several frames, or half of one.
+                            for (;;) {
+                                const headEnd = findBytes(buf, CRLF2, 0);
+                                if (headEnd < 0) break;
+                                const head = dec.decode(buf.subarray(0, headEnd));
+                                const m = head.match(/Content-Length:\s*(\d+)/i);
+                                if (!m) { buf = buf.subarray(headEnd + 4); continue; }
+                                const len = parseInt(m[1], 10);
+                                const start = headEnd + 4;
+                                if (buf.length < start + len) break;   // incomplete
+                                this.paint(new Blob([buf.slice(start, start + len)],
+                                                    { type: 'image/jpeg' }));
+                                buf = buf.subarray(start + len);
+                            }
+                        }
+                        try { await reader.cancel(); } catch (e) { /* already gone */ }
+                    } catch (e) {
+                        // 503 means the server is at its viewer limit, which
+                        // polling still gets around - so fall back rather
+                        // than leaving the tile black.
+                        this.errors += 1;
+                        if (this.errors >= 3) this.live = false;
+                        setOverall();
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                }
+                this.reader = null;
+            }
+
+            start() {
+                this.stopped = false;
+                if (isLive()) this.streamLoop();
+                else this.tick();
+            }
+
+            stop() {
+                this.stopped = true;
+                clearTimeout(this.timer);
+                if (this.reader) { try { this.reader.cancel(); } catch (e) {} }
+            }
+
+            // Sequential, not setInterval: a camera answering slower than
+            // the interval would otherwise stack overlapping requests
+            // until the browser's connection pool is full and every one
+            // of them is slow.
+            async tick() {
+                if (!running || isLive() || this.stopped) return;
+                try {
+                    const res = await Auth.fetch(`/api/cctv/snapshot?id=${encodeURIComponent(this.id)}`);
+                    if (!res.ok) throw new Error(String(res.status));
+                    const blob = await res.blob();
+                    if (!blob.size) throw new Error('empty');
+
+                    this.paint(blob);
+                } catch (e) {
+                    this.errors += 1;
+                    // One dropped frame is normal on wifi. Only call it
+                    // offline once it's clearly not a blip, so tiles don't
+                    // flicker red every time a packet goes missing.
+                    if (this.errors >= 3) {
+                        this.live = false;
+                        if (!this.frames) {
+                            el(`empty-${this.id}`).hidden = false;
+                            el(`empty-${this.id}`).querySelector('span').textContent = 'Cannot reach this camera.';
+                        }
+                    }
+                }
+                setOverall();
+                this.timer = setTimeout(() => this.tick(), rate());
+            }
+
+            refreshMeta() {
+                const stale = this.lastAt && (Date.now() - this.lastAt) > STALE_MS;
+                el(`frame-${this.id}`).classList.toggle('is-stale', !!stale);
+                const meta = el(`meta-${this.id}`);
+                if (!this.lastAt) { meta.textContent = this.live ? '—' : 'offline'; return; }
+                const secs = Math.round((Date.now() - this.lastAt) / 1000);
+                meta.textContent = `${this.frames} frames · ${secs < 2 ? 'just now' : secs + 's ago'}`;
+            }
+        }
+
+        async function discover() {
+            let list = [];
+            try {
+                const res = await Auth.fetch('/api/cctv/cameras');
+                const d = await res.json();
+                list = d.cameras || [];
+            } catch (e) { return; }
+
+            const seen = new Set(list.map(c => c.id));
+
+            // Drop tiles for cameras that have gone away entirely, so a
+            // renamed or removed camera doesn't leave a dead tile behind.
+            for (const [id, cam] of cams) {
+                if (!seen.has(id)) { cam.destroy(); cams.delete(id); }
+            }
+
+            for (const info of list) {
+                if (cams.has(info.id)) continue;
+                const cam = new Camera(info);
+                cams.set(info.id, cam);
+                if (running) cam.start();
+            }
+
+            el('noCams').hidden = cams.size > 0;
+            if (!cams.size) el('noCams').textContent =
+                'No cameras yet. Is the gate running, and is SAFETYFIRST_CCTV_URL set on the Pi?';
+            setOverall();
+        }
+
+        setInterval(() => cams.forEach(c => c.refreshMeta()), 1000);
+        setInterval(discover, RESCAN_MS);
+
+        el('toggleBtn').addEventListener('click', () => {
+            running = !running;
+            el('toggleBtn').innerHTML = running
+                ? '<i class="fas fa-pause"></i><span>Pause</span>'
+                : '<i class="fas fa-play"></i><span>Resume</span>';
+            if (running) cams.forEach(c => c.start());
+            else cams.forEach(c => c.stop());
+            setOverall();
+        });
+
+        // Changing this changes the transport, not just a number, so
+        // every tile has to be torn down and restarted on the new one.
+        el('rateSelect').addEventListener('change', () => {
+            cams.forEach(c => { c.stop(); if (running) c.start(); });
+        });
+
+        el('rescanBtn').addEventListener('click', discover);
+
+        // Stop pulling frames when nobody is looking. Left running, a
+        // background tab keeps the backend, the gate and every camera
+        // busy indefinitely for a picture no one can see.
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) cams.forEach(c => clearTimeout(c.timer));
+            else if (running) cams.forEach(c => c.tick());
+        });
+
+        discover();
+    </script>
+</body>
+</html>

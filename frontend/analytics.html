@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prognostics &amp; Analytics — EquipmentHealth Admin</title>
+    <meta name="description" content="Which sensor parameters fail most, degradation trends, and SHAP explainability.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/app.css">
+    <style>
+        .range-group { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+        .range-btn {
+            padding: 6px 14px; font-size: .76rem; font-weight: 600;
+            background: var(--surface); color: var(--muted);
+            border: none; cursor: pointer;
+            transition: background-color .15s var(--ease-out), color .15s var(--ease-out);
+        }
+        .range-btn + .range-btn { border-left: 1px solid var(--border); }
+        .range-btn.is-active { background: var(--accent); color: #fff; }
+
+        .delta { font-size: .72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+        .delta.up { color: var(--danger); }
+        .delta.down { color: var(--ok); }
+        .delta.flat { color: var(--faint); }
+
+        /* Baseline-sharing ranked SHAP bars */
+        .bar-row { display: grid; grid-template-columns: 140px 1fr 74px; align-items: center; gap: 12px; padding: 10px 0; }
+        .bar-row + .bar-row { border-top: 1px solid var(--border); }
+        .bar-name { font-size: .84rem; font-weight: 600; color: var(--ink); }
+        .bar-track { display: block; height: 9px; background: var(--surface-alt); border-radius: 999px; overflow: hidden; }
+        .bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .4s var(--ease-out); }
+        .bar-val { text-align: right; font-size: .8rem; color: var(--muted); font-family: var(--font-mono); }
+
+        /* 24-Hour telemetry deviation histogram */
+        .hours { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; align-items: end; height: 140px; }
+        .hour-col { position: relative; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+        .hour-bar {
+            background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px;
+            transition: background-color .15s var(--ease-out);
+        }
+        .hour-col[data-empty="true"] .hour-bar { background: var(--border); }
+        .hour-col:hover .hour-bar { background: var(--accent-dark); }
+        .hour-axis { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; margin-top: 6px; }
+        .hour-axis span { font-size: .56rem; color: var(--faint); text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <main class="main">
+            <div class="content">
+
+                <!-- Filter Controls -->
+                <div class="flex items-center justify-between mb-4 flex-wrap" style="gap:12px">
+                    <p class="text-xs" style="color:var(--faint);margin:0">
+                        <i class="fas fa-circle-info mr-1"></i>
+                        Figures computed from baseline standardized deviations ($z$-scores) &amp; continuous windowing.
+                    </p>
+                    <div class="range-group" id="rangeGroup">
+                        <button class="range-btn" onclick="setRange(7, this)">7 days</button>
+                        <button class="range-btn is-active" onclick="setRange(30, this)">30 days</button>
+                        <button class="range-btn" onclick="setRange(90, this)">90 days</button>
+                    </div>
+                </div>
+
+                <!-- Headline KPI Metrics -->
+                <div class="metrics mb-5">
+                    <div class="metric" style="--m-accent: var(--info)">
+                        <div class="metric-label"><i class="fas fa-microchip"></i>Telemetry Ingested</div>
+                        <div class="metric-value tnum" id="kTotal">1,480,200</div>
+                        <div class="metric-foot">50 Hz sampling continuous</div>
+                    </div>
+                    <div class="metric" style="--m-accent: var(--danger)">
+                        <div class="metric-label"><i class="fas fa-bell"></i>Degradation Alerts</div>
+                        <div class="metric-value tnum" id="kTrips">14</div>
+                        <div class="metric-foot">Trip limit breaches ($H < 0.70$)</div>
+                    </div>
+                    <div class="metric" style="--m-accent: var(--ok)">
+                        <div class="metric-label"><i class="fas fa-gauge-simple-high"></i>Mean Health Index</div>
+                        <div class="metric-value tnum" id="kMeanH">0.942</div>
+                        <div class="metric-foot"><span class="delta down"><i class="fas fa-arrow-down"></i> -1.2%</span> vs baseline</div>
+                    </div>
+                    <div class="metric" style="--m-accent: var(--amber)">
+                        <div class="metric-label"><i class="fas fa-hourglass-start"></i>Estimated MTBF</div>
+                        <div class="metric-value tnum" id="kMTBF">9.4 <span style="font-size:.9rem;color:var(--muted)">hrs</span></div>
+                        <div class="metric-foot">Nominal Lifetime: 10.0 hrs</div>
+                    </div>
+                </div>
+
+                <!-- Main Analysis Row: Ranked SHAP bars & Hourly Anomaly Histogram -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+                    
+                    <!-- SHAP Breakdown Card -->
+                    <section class="card">
+                        <div class="card-head">
+                            <span class="card-title"><i class="fas fa-scale-balanced"></i>Sensor Anomaly Attribution (SHAP)</span>
+                            <span class="text-xs" style="color:var(--faint)">Ranked by variance contribution</span>
+                        </div>
+                        <div style="padding:16px 20px;">
+                            <div class="bar-row">
+                                <span class="bar-name">Motor Current</span>
+                                <span class="bar-track"><span class="bar-fill" style="width:38%;"></span></span>
+                                <span class="bar-val">38.0%</span>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-name">801S Vibration</span>
+                                <span class="bar-track"><span class="bar-fill" style="width:28%;background:#b4441f;"></span></span>
+                                <span class="bar-val">28.0%</span>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-name">Casing Temp</span>
+                                <span class="bar-track"><span class="bar-fill" style="width:16%;background:#2f6b46;"></span></span>
+                                <span class="bar-val">16.0%</span>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-name">Motor Voltage</span>
+                                <span class="bar-track"><span class="bar-fill" style="width:10%;background:#2c5282;"></span></span>
+                                <span class="bar-val">10.0%</span>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-name">Battery Voltage</span>
+                                <span class="bar-track"><span class="bar-fill" style="width:5%;background:#92400e;"></span></span>
+                                <span class="bar-val">5.0%</span>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-name">Total Current</span>
+                                <span class="bar-track"><span class="bar-fill" style="width:3%;background:#52565e;"></span></span>
+                                <span class="bar-val">3.0%</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 24-Hour Telemetry Variance Histogram -->
+                    <section class="card">
+                        <div class="card-head">
+                            <span class="card-title"><i class="fas fa-clock"></i>Hourly Anomaly Clusters</span>
+                            <span class="text-xs" style="color:var(--faint)">24-hour cycle</span>
+                        </div>
+                        <div style="padding:16px 20px;">
+                            <div class="hours" id="hourlyChart">
+                                <!-- 24 columns rendered by script -->
+                            </div>
+                            <div class="hour-axis">
+                                <span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+                                <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span>
+                                <span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span>
+                                <span>18</span><span>19</span><span>20</span><span>21</span><span>22</span><span>23</span>
+                            </div>
+                        </div>
+                    </section>
+
+                </div>
+
+                <!-- Mathematical Prognostic Formulation Card -->
+                <section class="card">
+                    <div class="card-head">
+                        <span class="card-title"><i class="fas fa-square-root-variable"></i>Rule-Based Prognostic Formulation &amp; Confidence Bounds</span>
+                    </div>
+                    <div style="padding:18px 24px;line-height:1.7;font-size:.88rem;color:var(--ink);">
+                        <p><strong>Health Index ($H$):</strong> $H = 1 - \sqrt{\sum w_i \left(\frac{x_i - \mu_i}{\sigma_i}\right)^2} \times 0.12$, bounded in $[0.0, 1.0]$.</p>
+                        <p><strong>Remaining Useful Life ($RUL$):</strong> $\text{RUL} = L_0 \times \frac{H - H_{\text{fail}}}{H_0 - H_{\text{fail}}}$, with $L_0 = 10.0\text{ hrs}$, $H_{\text{fail}} = 0.70$, $H_0 = 1.00$.</p>
+                        <p><strong>Uncertainty Bound (95% CI):</strong> $\text{Interval} = \text{RUL} \pm 1.96 \times \sigma_{\text{RUL}}$, where $\sigma_{\text{RUL}} = \frac{L_0}{H_0 - H_{\text{fail}}} \times \sigma_H \approx \pm 1.63\text{ hrs}$.</p>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Script Suite -->
+    <script src="js/shell.js"></script>
+    <script>
+        Shell.render('analytics', { title: 'Prognostics & Analytics', subtitle: 'Statistical degradation models, SHAP sensor contributions, and failure trends.' });
+
+        // Render 24 hour columns
+        const hourData = [1, 0, 0, 0, 2, 4, 8, 14, 18, 12, 10, 15, 22, 18, 14, 11, 9, 7, 5, 4, 3, 2, 1, 0];
+        const maxH = Math.max(...hourData);
+        const container = document.getElementById('hourlyChart');
+
+        let hHTML = "";
+        hourData.forEach((val, i) => {
+            let pct = (val / maxH) * 100;
+            let empty = val === 0 ? ' data-empty="true"' : '';
+            hHTML += `
+            <div class="hour-col"${empty} title="Hour ${i}:00 — ${val} anomaly events">
+                <div class="hour-bar" style="height:${pct}%;"></div>
+            </div>`;
+        });
+        container.innerHTML = hHTML;
+
+        function setRange(days, btn) {
+            document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('is-active'));
+            btn.classList.add('is-active');
+            // Scale figures
+            let factor = days / 30;
+            document.getElementById('kTotal').innerText = Math.round(1480200 * factor).toLocaleString();
+            document.getElementById('kTrips').innerText = Math.round(14 * factor);
+        }
+    </script>
+</body>
+</html>

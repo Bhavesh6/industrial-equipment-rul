@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCADA Overview — EquipmentHealth Admin</title>
+    <meta name="description" content="Site-wide industrial equipment health monitoring, remaining useful life (RUL), and live sensor telemetry.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/app.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="app">
+        <main class="main">
+            <div class="content">
+
+                <!-- Control Bar & Scenario Switcher -->
+                <div class="flex items-center justify-between mb-4 flex-wrap" style="gap:12px">
+                    <p class="text-xs" style="color:var(--faint);margin:0">
+                        <i class="fas fa-circle-info mr-1"></i>
+                        Active Testbed: <strong>RS-380 Brushed DC Motor (12V)</strong> &middot; Sampling: <strong class="tnum">50 Hz</strong>
+                    </p>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <label class="text-xs font-semibold" style="color:var(--muted)">Fault Profile:</label>
+                        <select id="simScenario" onchange="changeScenario(this.value)" class="btn btn-sm" style="font-size:.78rem;padding:5px 10px;">
+                            <option value="Normal Operation">🟢 Normal Operation (Healthy)</option>
+                            <option value="Rotor Imbalance">🟡 Rotor Imbalance (High Vibration)</option>
+                            <option value="Mechanical Overload">🔴 Mechanical Overload (High Current)</option>
+                            <option value="Bearing Overheating">🔴 Bearing Wear & Thermal Runaway</option>
+                            <option value="Supply Voltage Sag">🟡 Power Supply Voltage Sag</option>
+                            <option value="Multi-Fault Critical">🚨 Multi-Fault Critical Cascade</option>
+                        </select>
+                        <button id="btn-stream" onclick="toggleStream()" class="btn btn-primary btn-sm"><i class="fas fa-play" id="stream-icon"></i><span id="stream-text">Live: ON</span></button>
+                        <button onclick="stepSample()" class="btn btn-outline btn-sm"><i class="fas fa-rotate"></i>Sample</button>
+                    </div>
+                </div>
+
+                <!-- Headline KPI Metrics -->
+                <div class="metrics mb-5">
+                    <div class="metric" style="--m-accent: var(--ok)">
+                        <div class="metric-label"><i class="fas fa-heart-pulse"></i>Health Index (H)</div>
+                        <div class="metric-value tnum" id="kHealth">0.962</div>
+                        <div class="metric-foot">Limit: <strong>&le; 0.700</strong> &middot; <span id="kHealthStatus" style="color:var(--ok);font-weight:600;">Nominal</span></div>
+                    </div>
+                    <div class="metric" style="--m-accent: var(--info)">
+                        <div class="metric-label"><i class="fas fa-hourglass-half"></i>Remaining Useful Life</div>
+                        <div class="metric-value tnum" id="kRUL">8.73 <span style="font-size:.9rem;color:var(--muted)">hrs</span></div>
+                        <div class="metric-foot" id="kCI">95% CI: [7.10h – 10.36h]</div>
+                    </div>
+                    <div class="metric" style="--m-accent: var(--danger)">
+                        <div class="metric-label"><i class="fas fa-triangle-exclamation"></i>Primary Anomaly Driver</div>
+                        <div class="metric-value" style="font-size:1.35rem;" id="kDriver">Motor Current</div>
+                        <div class="metric-foot">SHAP Impact: <strong id="kDriverPct" class="tnum">24.5%</strong></div>
+                    </div>
+                    <div class="metric" style="--m-accent: var(--accent)">
+                        <div class="metric-label"><i class="fas fa-ruler-combined"></i>RMS Deviation Score</div>
+                        <div class="metric-value tnum" id="kRMS">0.32 <span style="font-size:.9rem;color:var(--muted)">σ</span></div>
+                        <div class="metric-foot">Healthy Envelope: <strong>&le; 0.50 σ</strong></div>
+                    </div>
+                </div>
+
+                <!-- 6-Sensor Telemetry Grid Card -->
+                <section class="card mb-5">
+                    <div class="card-head">
+                        <span class="card-title"><i class="fas fa-wave-square"></i>High-Frequency Telemetry Matrix</span>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs tnum" style="color:var(--faint)" id="syncTime">Synchronized: Just now</span>
+                        </div>
+                    </div>
+                    <div class="sensor-grid" style="padding:18px;">
+                        <div class="sensor-card">
+                            <div class="sensor-title">Battery Voltage</div>
+                            <div class="sensor-val"><span id="s-vbatt">12.21</span> <span style="font-size:.7rem;color:var(--muted)">V</span></div>
+                            <div class="sensor-delta" style="color:var(--ok)" id="d-vbatt">Δ +0.01 V</div>
+                        </div>
+                        <div class="sensor-card">
+                            <div class="sensor-title">Motor Voltage</div>
+                            <div class="sensor-val"><span id="s-vmot">11.82</span> <span style="font-size:.7rem;color:var(--muted)">V</span></div>
+                            <div class="sensor-delta" style="color:var(--ok)" id="d-vmot">Δ +0.02 V</div>
+                        </div>
+                        <div class="sensor-card">
+                            <div class="sensor-title">Total System Current</div>
+                            <div class="sensor-val"><span id="s-itot">2.11</span> <span style="font-size:.7rem;color:var(--muted)">A</span></div>
+                            <div class="sensor-delta" style="color:var(--ok)" id="d-itot">Δ +0.01 A</div>
+                        </div>
+                        <div class="sensor-card">
+                            <div class="sensor-title">Motor Current (ACS715)</div>
+                            <div class="sensor-val"><span id="s-imot">1.86</span> <span style="font-size:.7rem;color:var(--muted)">A</span></div>
+                            <div class="sensor-delta" style="color:var(--ok)" id="d-imot">Δ +0.01 A</div>
+                        </div>
+                        <div class="sensor-card">
+                            <div class="sensor-title">Casing Temperature</div>
+                            <div class="sensor-val"><span id="s-temp">38.2</span> <span style="font-size:.7rem;color:var(--muted)">°C</span></div>
+                            <div class="sensor-delta" style="color:var(--ok)" id="d-temp">Δ +0.2 °C</div>
+                        </div>
+                        <div class="sensor-card">
+                            <div class="sensor-title">801S Vibration</div>
+                            <div class="sensor-val"><span id="s-vib">0.354</span> <span style="font-size:.7rem;color:var(--muted)">g</span></div>
+                            <div class="sensor-delta" style="color:var(--ok)" id="d-vib">Δ +0.004 g</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Dual Visual Analytics Row: Health Trajectory & Dual Domain Oscilloscope -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+                    
+                    <section class="card">
+                        <div class="card-head">
+                            <span class="card-title"><i class="fas fa-chart-area"></i>Health Index Degradation Trajectory</span>
+                            <span class="pill ok" id="healthPill">Status: Healthy</span>
+                        </div>
+                        <div style="position:relative;height:240px;padding:16px;">
+                            <canvas id="chart-trajectory"></canvas>
+                        </div>
+                    </section>
+
+                    <section class="card">
+                        <div class="card-head">
+                            <span class="card-title"><i class="fas fa-chart-line"></i>Telemetry Oscilloscope</span>
+                            <span class="text-xs" style="color:var(--muted)">Motor Current &amp; Vibration</span>
+                        </div>
+                        <div style="position:relative;height:240px;padding:16px;">
+                            <canvas id="chart-oscilloscope"></canvas>
+                        </div>
+                    </section>
+
+                </div>
+
+                <!-- Real-Time Activity Log Table -->
+                <section class="card">
+                    <div class="card-head">
+                        <span class="card-title"><i class="fas fa-list-check"></i>Recent Telemetry &amp; Health Events</span>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs" style="color:var(--faint)" id="logCount">5 records</span>
+                            <button onclick="exportCSV()" class="btn btn-outline btn-sm"><i class="fas fa-file-csv"></i>Export CSV</button>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Operating Mode</th>
+                                    <th>Health Index (H)</th>
+                                    <th>Est. RUL</th>
+                                    <th>Motor Current</th>
+                                    <th>Vibration</th>
+                                    <th>Temperature</th>
+                                    <th>Evaluation</th>
+                                </tr>
+                            </thead>
+                            <tbody id="telemetryTableBody">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Script Suite -->
+    <script src="js/shell.js"></script>
+    <script>
+        Shell.render('admin', { title: 'SCADA Overview', subtitle: 'Real-time telemetry, equipment health index, and Remaining Useful Life (RUL).' });
+
+        const BASELINES = {
+            battery_voltage: { name: "Battery Voltage", mean: 12.20, std: 0.12, unit: "V", weight: 0.05 },
+            motor_voltage:   { name: "Motor Voltage", mean: 11.80, std: 0.15, unit: "V", weight: 0.15 },
+            total_current:   { name: "Total Current", mean: 2.10, std: 0.10, unit: "A", weight: 0.05 },
+            motor_current:   { name: "Motor Current", mean: 1.85, std: 0.08, unit: "A", weight: 0.25 },
+            temperature:     { name: "Temperature", mean: 38.00, std: 1.20, unit: "°C", weight: 0.25 },
+            vibration:       { name: "Vibration", mean: 0.35, std: 0.05, unit: "g", weight: 0.25 }
+        };
+
+        const NOMINAL_L0 = 10.0;
+        const H_FAIL = 0.70;
+        const H0 = 1.00;
+
+        let activeScenario = "Normal Operation";
+        let isStreaming = true;
+        let streamTimer = null;
+        let auditLog = [];
+
+        // Chart.js Theme setup
+        Chart.defaults.color = '#52565e';
+        Chart.defaults.font.family = "'Inter', sans-serif";
+
+        const ctxTrajectory = document.getElementById('chart-trajectory').getContext('2d');
+        const chartTrajectory = new Chart(ctxTrajectory, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Health Index (H)',
+                        data: [],
+                        borderColor: '#2f6b46',
+                        backgroundColor: 'rgba(47, 107, 70, 0.08)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.2,
+                        pointRadius: 3
+                    },
+                    {
+                        label: 'Threshold (0.70)',
+                        data: [],
+                        borderColor: '#b3271e',
+                        borderWidth: 1.5,
+                        borderDash: [4, 4],
+                        fill: false,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { min: 0.4, max: 1.05, grid: { color: '#e4e2dd' } },
+                    x: { grid: { color: '#e4e2dd' } }
+                },
+                plugins: { legend: { position: 'top' } }
+            }
+        });
+
+        const ctxOsc = document.getElementById('chart-oscilloscope').getContext('2d');
+        const chartOsc = new Chart(ctxOsc, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Motor Current (A)',
+                        data: [],
+                        borderColor: '#b4441f',
+                        borderWidth: 2,
+                        tension: 0.2,
+                        pointRadius: 0,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Vibration (g)',
+                        data: [],
+                        borderColor: '#2c5282',
+                        borderWidth: 2,
+                        tension: 0.2,
+                        pointRadius: 0,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { position: 'left', grid: { color: '#e4e2dd' }, title: { display: true, text: 'Current (A)' } },
+                    y1: { position: 'right', grid: { display: false }, title: { display: true, text: 'Vibration (g)' } },
+                    x: { display: false }
+                }
+            }
+        });
+
+        function calculateMetrics() {
+            let biases = { battery_voltage: 0, motor_voltage: 0, total_current: 0, motor_current: 0, temperature: 0, vibration: 0 };
+
+            if (activeScenario.includes("Imbalance")) {
+                biases.vibration = 0.45 + Math.random() * 0.35;
+                biases.motor_current = 0.20 + Math.random() * 0.15;
+            } else if (activeScenario.includes("Overload")) {
+                biases.motor_current = 1.45 + Math.random() * 1.0;
+                biases.total_current = biases.motor_current + 0.15;
+                biases.motor_voltage = -1.2;
+                biases.temperature = 12.0;
+            } else if (activeScenario.includes("Bearing")) {
+                biases.temperature = 26.0 + Math.random() * 12.0;
+                biases.vibration = 0.22 + Math.random() * 0.10;
+                biases.motor_current = 0.35;
+            } else if (activeScenario.includes("Voltage Sag")) {
+                biases.battery_voltage = -2.5;
+                biases.motor_voltage = -2.8;
+                biases.motor_current = -0.3;
+            } else if (activeScenario.includes("Critical")) {
+                biases.vibration = 0.65 + Math.random() * 0.30;
+                biases.motor_current = 1.80 + Math.random() * 0.80;
+                biases.temperature = 32.0;
+                biases.motor_voltage = -1.5;
+            }
+
+            let telemetry = {};
+            let weightedDevs = {};
+            let totalDev = 0;
+
+            for (let [k, p] of Object.entries(BASELINES)) {
+                let noise = (Math.random() - 0.5) * 2 * (p.std * 0.75);
+                let val = Math.max(0.01, p.mean + biases[k] + noise);
+                telemetry[k] = Number(val.toFixed(3));
+
+                let wdev = p.weight * Math.pow((val - p.mean) / p.std, 2);
+                weightedDevs[k] = wdev;
+                totalDev += wdev;
+            }
+
+            let rms = Math.sqrt(totalDev);
+            let health = Math.max(0.0, Math.min(1.0, 1.0 - (rms * 0.12)));
+            let rul = health > H_FAIL ? NOMINAL_L0 * ((health - H_FAIL) / (H0 - H_FAIL)) : (health / H_FAIL) * 0.5;
+            let rulLow = Math.max(0, rul - 1.63);
+            let rulHigh = rul + 1.63;
+
+            let contribs = {};
+            let topKey = "motor_current";
+            let maxPct = 0;
+
+            for (let [k, dev] of Object.entries(weightedDevs)) {
+                let pct = totalDev > 0 ? (dev / totalDev) * 100 : 16.6;
+                contribs[k] = Number(pct.toFixed(1));
+                if (pct > maxPct) {
+                    maxPct = pct;
+                    topKey = k;
+                }
+            }
+
+            return {
+                telemetry,
+                health: Number(health.toFixed(3)),
+                rul: Number(rul.toFixed(2)),
+                rulLow: Number(rulLow.toFixed(2)),
+                rulHigh: Number(rulHigh.toFixed(2)),
+                rms: Number(rms.toFixed(2)),
+                contribs,
+                topKey,
+                topPct: Number(maxPct.toFixed(1))
+            };
+        }
+
+        function updateDisplay(res) {
+            document.getElementById('kHealth').innerText = res.health.toFixed(3);
+            document.getElementById('kRUL').innerHTML = `${res.rul.toFixed(2)} <span style="font-size:.9rem;color:var(--muted)">hrs</span>`;
+            document.getElementById('kCI').innerText = `95% CI: [${res.rulLow.toFixed(2)}h – ${res.rulHigh.toFixed(2)}h]`;
+            document.getElementById('kDriver').innerText = BASELINES[res.topKey].name;
+            document.getElementById('kDriverPct').innerText = `${res.topPct}%`;
+            document.getElementById('kRMS').innerHTML = `${res.rms.toFixed(2)} <span style="font-size:.9rem;color:var(--muted)">σ</span>`;
+
+            const pill = document.getElementById('healthPill');
+            const stLabel = document.getElementById('kHealthStatus');
+            if (res.health >= 0.85) {
+                pill.className = "pill ok";
+                pill.innerText = "Status: Nominal";
+                stLabel.style.color = "var(--ok)";
+                stLabel.innerText = "Nominal";
+            } else if (res.health >= 0.70) {
+                pill.className = "pill hazard";
+                pill.innerText = "Status: Warning";
+                stLabel.style.color = "var(--hazard)";
+                stLabel.innerText = "Degraded";
+            } else {
+                pill.className = "pill danger";
+                pill.innerText = "Status: Critical";
+                stLabel.style.color = "var(--danger)";
+                stLabel.innerText = "Trip Risk";
+            }
+
+            document.getElementById('s-vbatt').innerText = res.telemetry.battery_voltage.toFixed(2);
+            document.getElementById('s-vmot').innerText = res.telemetry.motor_voltage.toFixed(2);
+            document.getElementById('s-itot').innerText = res.telemetry.total_current.toFixed(2);
+            document.getElementById('s-imot').innerText = res.telemetry.motor_current.toFixed(2);
+            document.getElementById('s-temp').innerText = res.telemetry.temperature.toFixed(1);
+            document.getElementById('s-vib').innerText = res.telemetry.vibration.toFixed(3);
+
+            let dVb = res.telemetry.battery_voltage - BASELINES.battery_voltage.mean;
+            let dVm = res.telemetry.motor_voltage - BASELINES.motor_voltage.mean;
+            let dIt = res.telemetry.total_current - BASELINES.total_current.mean;
+            let dIm = res.telemetry.motor_current - BASELINES.motor_current.mean;
+            let dTe = res.telemetry.temperature - BASELINES.temperature.mean;
+            let dVi = res.telemetry.vibration - BASELINES.vibration.mean;
+
+            document.getElementById('d-vbatt').innerText = `Δ ${dVb >= 0 ? '+' : ''}${dVb.toFixed(2)} V`;
+            document.getElementById('d-vmot').innerText = `Δ ${dVm >= 0 ? '+' : ''}${dVm.toFixed(2)} V`;
+            document.getElementById('d-itot').innerText = `Δ ${dIt >= 0 ? '+' : ''}${dIt.toFixed(2)} A`;
+            document.getElementById('d-imot').innerText = `Δ ${dIm >= 0 ? '+' : ''}${dIm.toFixed(2)} A`;
+            document.getElementById('d-temp').innerText = `Δ ${dTe >= 0 ? '+' : ''}${dTe.toFixed(1)} °C`;
+            document.getElementById('d-vib').innerText = `Δ ${dVi >= 0 ? '+' : ''}${dVi.toFixed(3)} g`;
+
+            let nowStr = new Date().toLocaleTimeString();
+            document.getElementById('syncTime').innerText = `Synchronized: ${nowStr}`;
+
+            if (chartTrajectory.data.labels.length > 20) {
+                chartTrajectory.data.labels.shift();
+                chartTrajectory.data.datasets[0].data.shift();
+                chartTrajectory.data.datasets[1].data.shift();
+
+                chartOsc.data.labels.shift();
+                chartOsc.data.datasets[0].data.shift();
+                chartOsc.data.datasets[1].data.shift();
+            }
+
+            chartTrajectory.data.labels.push(nowStr);
+            chartTrajectory.data.datasets[0].data.push(res.health);
+            chartTrajectory.data.datasets[1].data.push(0.70);
+            chartTrajectory.update('none');
+
+            chartOsc.data.labels.push(nowStr);
+            chartOsc.data.datasets[0].data.push(res.telemetry.motor_current);
+            chartOsc.data.datasets[1].data.push(res.telemetry.vibration);
+            chartOsc.update('none');
+
+            // Append to table
+            auditLog.unshift({
+                time: nowStr,
+                mode: activeScenario,
+                health: res.health,
+                rul: res.rul,
+                motor_i: res.telemetry.motor_current,
+                vib: res.telemetry.vibration,
+                temp: res.telemetry.temperature,
+                eval: res.health >= 0.85 ? '<span class="pill ok">Nominal</span>' : (res.health >= 0.70 ? '<span class="pill hazard">Warning</span>' : '<span class="pill danger">Critical</span>')
+            });
+            if (auditLog.length > 20) auditLog.pop();
+
+            let tHTML = "";
+            auditLog.forEach(row => {
+                tHTML += `
+                <tr>
+                    <td class="tnum">${row.time}</td>
+                    <td><span class="pill info" style="font-size:.70rem">${row.mode}</span></td>
+                    <td class="tnum font-semibold">${row.health.toFixed(3)}</td>
+                    <td class="tnum">${row.rul.toFixed(2)}h</td>
+                    <td class="tnum">${row.motor_i.toFixed(2)}A</td>
+                    <td class="tnum">${row.vib.toFixed(3)}g</td>
+                    <td class="tnum">${row.temp.toFixed(1)}°C</td>
+                    <td>${row.eval}</td>
+                </tr>
+                `;
+            });
+            document.getElementById('telemetryTableBody').innerHTML = tHTML;
+            document.getElementById('logCount').innerText = `${auditLog.length} recorded events`;
+        }
+
+        function stepSample() {
+            let res = calculateMetrics();
+            updateDisplay(res);
+        }
+
+        function changeScenario(val) {
+            activeScenario = val;
+            stepSample();
+        }
+
+        function toggleStream() {
+            isStreaming = !isStreaming;
+            const btn = document.getElementById('btn-stream');
+            const txt = document.getElementById('stream-text');
+            const icon = document.getElementById('stream-icon');
+
+            if (isStreaming) {
+                txt.innerText = "Live: ON";
+                icon.className = "fas fa-play";
+                btn.className = "btn btn-primary btn-sm";
+                streamTimer = setInterval(stepSample, 1800);
+            } else {
+                txt.innerText = "Live: PAUSED";
+                icon.className = "fas fa-pause";
+                btn.className = "btn btn-outline btn-sm";
+                clearInterval(streamTimer);
+            }
+        }
+
+        function exportCSV() {
+            let csv = "Time,Mode,Health,RUL,Motor_Current,Vibration,Temperature\n";
+            auditLog.forEach(r => {
+                csv += `"${r.time}","${r.mode}",${r.health},${r.rul},${r.motor_i},${r.vib},${r.temp}\n`;
+            });
+            let blob = new Blob([csv], { type: 'text/csv' });
+            let url = window.URL.createObjectURL(blob);
+            let a = document.createElement('a');
+            a.setAttribute('href', url);
+            a.setAttribute('download', `rs380_scada_log_${new Date().getTime()}.csv`);
+            a.click();
+        }
+
+        // Initialize with 5 data points
+        for(let i=0; i<5; i++) {
+            stepSample();
+        }
+        streamTimer = setInterval(stepSample, 1800);
+    </script>
+</body>
+</html>
