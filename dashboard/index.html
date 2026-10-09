@@ -409,6 +409,119 @@
           </div>
         </div>
 
+        <!-- Motor Actuation & SCADA Hardware Control Console -->
+        <section class="card mb-5" style="border-left: 4px solid var(--accent); background: linear-gradient(180deg, var(--surface) 0%, var(--surface-alt) 100%);">
+          <div class="card-head" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span class="card-title"><i data-lucide="sliders"></i> RS-380 Motor Actuation &amp; Speed Controller</span>
+              <span class="badge" id="ctrlHwBadge" style="background:var(--ok-soft);color:var(--ok);border:1px solid #c3ddcd;font-size:.68rem">
+                <span class="live-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:4px"></span>
+                <span id="ctrlHwStatus">COM5 CONNECTED</span>
+              </span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span class="badge badge-info" id="ctrlDirBadge">FORWARD (CW)</span>
+              <span class="status-pill good" id="ctrlMotorStatePill">
+                <span class="status-dot"></span><span id="ctrlMotorStateText">STANDBY</span>
+              </span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="grid-2" style="align-items:center;gap:24px">
+              
+              <!-- Left Column: Primary Actuator Buttons & State -->
+              <div style="display:flex;flex-direction:column;gap:12px;border-right:1px solid var(--border);padding-right:20px">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <div style="font-size:.78rem;font-weight:700;color:var(--faint);letter-spacing:.08em;text-transform:uppercase">
+                    Drive Actuation
+                  </div>
+                  <div class="mono" style="font-size:.85rem;color:var(--muted)">
+                    Shaft RPM: <span id="ctrlLiveRpm" style="font-weight:700;color:var(--ink)">0</span>
+                  </div>
+                </div>
+
+                <!-- Primary Action Buttons -->
+                <div style="display:grid;grid-template-columns: 1fr 1fr;gap:10px">
+                  <button type="button" class="btn btn-primary" id="btnMotorStart" onclick="sendMotorCmd('start')" style="background:#2f6b46;border-color:#2f6b46;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px">
+                    <i data-lucide="play" style="width:16px;height:16px"></i> <strong>START</strong>
+                  </button>
+                  <button type="button" class="btn btn-outline" id="btnMotorStop" onclick="sendMotorCmd('stop')" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px">
+                    <i data-lucide="square" style="width:16px;height:16px"></i> <strong>STOP</strong>
+                  </button>
+                </div>
+
+                <!-- Direction & Reset Row -->
+                <div style="display:grid;grid-template-columns: 1fr 1fr;gap:10px">
+                  <button type="button" class="btn btn-outline" id="btnMotorReverse" onclick="sendMotorCmd('reverse')" style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:.78rem">
+                    <i data-lucide="repeat" style="width:14px;height:14px"></i> Flip Dir
+                  </button>
+                  <button type="button" class="btn btn-outline" id="btnMotorReset" onclick="sendMotorCmd('reset')" style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:.78rem">
+                    <i data-lucide="rotate-ccw" style="width:14px;height:14px"></i> Clear Trip
+                  </button>
+                </div>
+
+                <!-- Red Emergency E-STOP Button -->
+                <button type="button" class="btn" id="btnMotorEstop" onclick="sendMotorCmd('estop')" style="background:#dc2626;border:1px solid #b91c1c;color:#fff;font-weight:800;letter-spacing:.08em;padding:10px 16px;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 2px 8px rgba(220,38,38,0.35);cursor:pointer;border-radius:var(--radius)">
+                  <i data-lucide="octagon-alert" style="width:18px;height:18px"></i> EMERGENCY STOP (E-STOP)
+                </button>
+              </div>
+
+              <!-- Right Column: Interactive PWM Speed Modulation & Presets -->
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <div style="display:flex;align-items:baseline;justify-content:space-between">
+                  <div>
+                    <div style="font-size:.78rem;font-weight:700;color:var(--faint);letter-spacing:.08em;text-transform:uppercase">
+                      PWM Speed Modulation
+                    </div>
+                    <div style="font-size:.72rem;color:var(--muted);margin-top:2px">
+                      L298N 5kHz Slew-Limited Output
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:baseline;gap:8px">
+                    <span class="mono" id="ctrlSpeedPwm" style="font-size:1.8rem;font-weight:800;color:var(--accent);line-height:1">0</span>
+                    <span class="mono" style="font-size:.85rem;color:var(--muted)">/ 255</span>
+                    <span class="badge badge-info mono" id="ctrlSpeedPct" style="font-size:.8rem;font-weight:700">0%</span>
+                  </div>
+                </div>
+
+                <!-- Range Slider -->
+                <div style="position:relative;padding:4px 0">
+                  <input type="range" id="ctrlSpeedSlider" min="0" max="255" step="5" value="0"
+                         oninput="onSpeedSliderInput(this.value)"
+                         onchange="onSpeedSliderChange(this.value)"
+                         style="width:100%;height:8px;accent-color:var(--accent);cursor:pointer;border-radius:999px">
+                  <div style="display:flex;justify-content:space-between;font-size:.67rem;color:var(--faint);margin-top:6px;font-family:monospace">
+                    <span>0 (STOP)</span>
+                    <span>128 (50%)</span>
+                    <span style="color:var(--accent)">160 (START)</span>
+                    <span>200 (78%)</span>
+                    <span>255 (MAX)</span>
+                  </div>
+                </div>
+
+                <!-- Quick Preset Buttons -->
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span style="font-size:.72rem;color:var(--faint);font-weight:600;text-transform:uppercase">Presets:</span>
+                  <button type="button" class="btn btn-outline btn-sm" data-pwm-preset="0" onclick="setSpeedPreset(0)">0 (STOP)</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-pwm-preset="150" onclick="setSpeedPreset(150)">150 (MIN)</button>
+                  <button type="button" class="btn btn-outline btn-sm is-active" data-pwm-preset="160" onclick="setSpeedPreset(160)">160 (63% START)</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-pwm-preset="190" onclick="setSpeedPreset(190)">190 (75%)</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-pwm-preset="220" onclick="setSpeedPreset(220)">220 (86%)</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-pwm-preset="255" onclick="setSpeedPreset(255)">255 (MAX)</button>
+                </div>
+
+                <!-- Live Electrical Feedback Bar -->
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:.75rem">
+                  <span style="color:var(--muted)">Terminal Drive: <strong class="mono" id="ctrlEstVolt" style="color:var(--ink)">0.00 V</strong></span>
+                  <span style="color:var(--muted)">Motor Current: <strong class="mono" id="ctrlLiveCurr" style="color:var(--accent)">0.00 A</strong></span>
+                  <span style="color:var(--muted)">Motor Temp: <strong class="mono" id="ctrlLiveTemp" style="color:var(--hazard)">-- °C</strong></span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </section>
+
         <!-- Sensor grid (perfect 3x2 6-tile grid) + Equipment Condition Assessment Card -->
         <div class="grid-2 mb-5">
           <!-- 6-tile live sensor feed (perfectly balanced 3x2 grid, NO empty hole!) -->
@@ -487,12 +600,12 @@
           </section>
         </div>
 
-        <!-- DC Power Distribution & 4S Battery Pack Subsystem Card -->
+        <!-- DC Power Distribution & 3S Battery Pack Subsystem Card -->
         <section class="card mb-5">
           <div class="card-head">
-            <span class="card-title"><i data-lucide="zap"></i> DC Power Distribution &amp; 4S Battery Pack Telemetry</span>
+            <span class="card-title"><i data-lucide="zap"></i> DC Power Distribution &amp; 3S Battery Pack Telemetry</span>
             <div style="display:flex;align-items:center;gap:10px">
-              <span class="badge badge-ok" id="pwrStatusBadge">Bus Stable &bull; 14.8V</span>
+              <span class="badge badge-ok" id="pwrStatusBadge">Bus Stable &bull; 11.1V</span>
               <span class="live-pill is-live" style="font-size:.65rem;padding:3px 9px"><span class="live-dot"></span>Power Telemetry</span>
             </div>
           </div>
@@ -564,10 +677,10 @@
                 </div>
               </div>
 
-              <!-- Column 3: 4S Battery Pack Cell Telemetry -->
+              <!-- Column 3: 3S Battery Pack Cell Telemetry -->
               <div class="power-col">
                 <div class="power-col-header">
-                  <span class="power-col-title"><i data-lucide="battery-charging"></i> 4S Battery Pack Cells</span>
+                  <span class="power-col-title"><i data-lucide="battery-charging"></i> 3S Battery Pack Cells</span>
                   <span class="badge badge-ok" id="pwrCellBadge">Balanced &bull; &Delta; 22 mV</span>
                 </div>
                 <div class="cell-bars-grid">
@@ -586,15 +699,10 @@
                     <div class="cell-track"><div class="cell-fill" id="pwrCellBar3" style="width:75%"></div></div>
                     <span class="cell-volt" id="pwrCell3">3.710 V</span>
                   </div>
-                  <div class="cell-row">
-                    <span class="cell-name">Cell 4</span>
-                    <div class="cell-track"><div class="cell-fill" id="pwrCellBar4" style="width:73%"></div></div>
-                    <span class="cell-volt" id="pwrCell4">3.693 V</span>
-                  </div>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;font-size:.68rem;color:var(--faint);padding-top:4px;border-top:1px solid var(--border)">
                   <span id="pwrCellDelta">Imbalance: 22 mV</span>
-                  <span>Health: 99.4% &bull; Li-ion 4S</span>
+                  <span>Health: 99.4% &bull; Li-ion 3S</span>
                 </div>
               </div>
             </div>
@@ -644,7 +752,7 @@
                   <th>I_mot (A)</th>
                   <th>V_tot (V)</th>
                   <th>V_mot (V)</th>
-                  <th>4S Cells (V)</th>
+                  <th>3S Cells (V)</th>
                   <th>Health</th>
                   <th>RUL h</th>
                   <th>Status</th>
@@ -1665,7 +1773,9 @@ function updateLogTable(r) {
 
   const healthColor = r.health > 70 ? 'var(--ok)' : r.health > 40 ? 'var(--hazard)' : 'var(--danger)';
 
-  const cellSummary = `${fmt(r.vals.cell1,2)}|${fmt(r.vals.cell2,2)}|${fmt(r.vals.cell3,2)}|${fmt(r.vals.cell4,2)}`;
+  const cellSummary = (r.vals.cell4 && r.vals.cell4 > 0)
+    ? `${fmt(r.vals.cell1,2)}|${fmt(r.vals.cell2,2)}|${fmt(r.vals.cell3,2)}|${fmt(r.vals.cell4,2)}`
+    : `${fmt(r.vals.cell1,2)}|${fmt(r.vals.cell2,2)}|${fmt(r.vals.cell3,2)}`;
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td style="white-space:nowrap;color:var(--muted);font-size:.8rem">${timeStr(r.ts)}</td>
@@ -1969,12 +2079,300 @@ document.getElementById('alertKindGroup').addEventListener('click', e => {
     </div>`).join('');
 });
 
-// ─────────── MAIN LOOP ───────────
+// ─────────── HARDWARE MOTOR ACTUATION CONTROLLER ───────────
+let motorControlState = {
+  running: false,
+  pwm: 0,
+  direction: 'FWD',
+  safetyTripped: false,
+  safetyTripReason: 'NONE',
+  connected: false,
+  isInteracting: false
+};
+
+async function sendMotorCmd(action, value = null) {
+  // Optimistic UI updates
+  if (action === 'start') {
+    motorControlState.running = true;
+    motorControlState.safetyTripped = false;
+    motorControlState.safetyTripReason = 'NONE';
+    if (motorControlState.pwm < 140) motorControlState.pwm = 160;
+  } else if (action === 'stop') {
+    motorControlState.running = false;
+    motorControlState.pwm = 0;
+  } else if (action === 'estop' || action === 'emergency_stop') {
+    motorControlState.running = false;
+    motorControlState.safetyTripped = true;
+    motorControlState.safetyTripReason = 'MANUAL_ESTOP';
+    motorControlState.pwm = 0;
+  } else if (action === 'speed') {
+    const p = Math.max(0, Math.min(255, parseInt(value, 10) || 0));
+    motorControlState.pwm = p;
+    if (p > 0) {
+      motorControlState.running = true;
+      motorControlState.safetyTripped = false;
+      motorControlState.safetyTripReason = 'NONE';
+    } else {
+      motorControlState.running = false;
+    }
+  } else if (action === 'reset' || action === 'clear_trip') {
+    motorControlState.safetyTripped = false;
+    motorControlState.safetyTripReason = 'NONE';
+  } else if (action === 'reverse') {
+    motorControlState.direction = motorControlState.direction === 'FWD' ? 'REV' : 'FWD';
+  }
+  renderMotorControlUI();
+
+  try {
+    const res = await fetch('/api/motor/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, value })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      console.warn('[MOTOR CTRL] Command rejected by server:', data.message);
+    }
+  } catch (err) {
+    console.error('[MOTOR CTRL] Error dispatching command:', err);
+  }
+}
+
+function onSpeedSliderInput(val) {
+  motorControlState.isInteracting = true;
+  const v = parseInt(val, 10);
+  motorControlState.pwm = v;
+  document.getElementById('ctrlSpeedPwm').textContent = v;
+  document.getElementById('ctrlSpeedPct').textContent = Math.round((v / 255) * 100) + '%';
+  document.querySelectorAll('#sec-overview [data-pwm-preset]').forEach(b => {
+    b.classList.toggle('is-active', parseInt(b.getAttribute('data-pwm-preset'), 10) === v);
+  });
+}
+
+function onSpeedSliderChange(val) {
+  motorControlState.isInteracting = false;
+  const v = parseInt(val, 10);
+  sendMotorCmd('speed', v);
+}
+
+function setSpeedPreset(val) {
+  const slider = document.getElementById('ctrlSpeedSlider');
+  if (slider) slider.value = val;
+  onSpeedSliderInput(val);
+  motorControlState.isInteracting = false;
+  sendMotorCmd('speed', val);
+}
+
+function renderMotorControlUI() {
+  const statePill = document.getElementById('ctrlMotorStatePill');
+  const stateText = document.getElementById('ctrlMotorStateText');
+  const dirBadge  = document.getElementById('ctrlDirBadge');
+  const slider    = document.getElementById('ctrlSpeedSlider');
+  const pwmEl     = document.getElementById('ctrlSpeedPwm');
+  const pctEl     = document.getElementById('ctrlSpeedPct');
+  const startBtn  = document.getElementById('btnMotorStart');
+
+  if (motorControlState.safetyTripped) {
+    if (statePill) statePill.className = 'status-pill critical';
+    if (stateText) stateText.textContent = 'TRIP: ' + (motorControlState.safetyTripReason || 'FAULT');
+  } else if (motorControlState.running && motorControlState.pwm > 0) {
+    if (statePill) statePill.className = 'status-pill good';
+    if (stateText) stateText.textContent = 'RUNNING (' + motorControlState.pwm + ')';
+  } else {
+    if (statePill) statePill.className = 'status-pill warning';
+    if (stateText) stateText.textContent = 'STANDBY / OFF';
+  }
+
+  if (dirBadge) {
+    dirBadge.textContent = motorControlState.direction === 'REV' ? 'REVERSE (CCW)' : 'FORWARD (CW)';
+    dirBadge.className = motorControlState.direction === 'REV' ? 'badge badge-hazard' : 'badge badge-info';
+  }
+
+  if (!motorControlState.isInteracting) {
+    if (slider) slider.value = motorControlState.pwm;
+    if (pwmEl) pwmEl.textContent = motorControlState.pwm;
+    if (pctEl) pctEl.textContent = Math.round((motorControlState.pwm / 255) * 100) + '%';
+    document.querySelectorAll('#sec-overview [data-pwm-preset]').forEach(b => {
+      b.classList.toggle('is-active', parseInt(b.getAttribute('data-pwm-preset'), 10) === motorControlState.pwm);
+    });
+  }
+
+  if (startBtn) {
+    startBtn.style.opacity = (motorControlState.running && motorControlState.pwm > 0) ? '1' : '0.85';
+    startBtn.style.boxShadow = (motorControlState.running && motorControlState.pwm > 0) ? '0 0 10px rgba(47,107,70,0.5)' : 'none';
+  }
+}
+
+function updateHardwareStatus(connected, port = 'COM5') {
+  motorControlState.connected = connected;
+  const hwBadge = document.getElementById('ctrlHwBadge');
+  const hwStatus = document.getElementById('ctrlHwStatus');
+  if (hwBadge && hwStatus) {
+    if (connected) {
+      hwBadge.style.background = 'var(--ok-soft)';
+      hwBadge.style.color = 'var(--ok)';
+      hwBadge.style.borderColor = '#c3ddcd';
+      hwStatus.textContent = (port || 'COM5') + ' LIVE';
+    } else {
+      hwBadge.style.background = 'var(--surface-alt)';
+      hwBadge.style.color = 'var(--muted)';
+      hwBadge.style.borderColor = 'var(--border)';
+      hwStatus.textContent = 'SIMULATED (COM5 OFFLINE)';
+    }
+  }
+}
+
+function updateControlPanelFromHw(hw) {
+  if (!hw) return;
+  const pwm = hw.pwm !== undefined ? hw.pwm : 0;
+  const isRunning = pwm > 0;
+  const dir = hw.direction || 'FWD';
+  const alertStr = hw.alert || 'NONE';
+  const isTripped = alertStr.includes('TRIP') || alertStr === 'MANUAL_ESTOP';
+
+  motorControlState.direction = dir;
+  motorControlState.safetyTripped = isTripped;
+  motorControlState.safetyTripReason = alertStr;
+
+  if (!motorControlState.isInteracting) {
+    motorControlState.pwm = pwm;
+    motorControlState.running = isRunning;
+  }
+  renderMotorControlUI();
+
+  const rpmEl = document.getElementById('ctrlLiveRpm');
+  if (rpmEl) rpmEl.textContent = hw.rpm || 0;
+  const voltEl = document.getElementById('ctrlEstVolt');
+  if (voltEl) voltEl.textContent = (hw.motor_voltage !== undefined ? hw.motor_voltage : 0).toFixed(2) + ' V';
+  const currEl = document.getElementById('ctrlLiveCurr');
+  if (currEl) currEl.textContent = (hw.motor_current !== undefined ? hw.motor_current : 0).toFixed(2) + ' A';
+  const tempEl = document.getElementById('ctrlLiveTemp');
+  if (tempEl) tempEl.textContent = (hw.temperature !== undefined ? hw.temperature : 0).toFixed(1) + ' °C';
+}
+
+function transformHardwareTelemetry(hw, pred) {
+  const motorCurr = +(hw.motor_current || 0).toFixed(3);
+  const totalCurr = +(hw.total_current || 0).toFixed(3);
+  const auxCurr   = +(Math.max(0, totalCurr - motorCurr)).toFixed(3);
+
+  const c1 = +(hw.cell1 || 0).toFixed(3);
+  const c2 = +(hw.cell2 || 0).toFixed(3);
+  const c3 = +(hw.cell3 || 0).toFixed(3);
+  const c4 = 0.0;
+  const totalVolt = +(hw.battery_voltage || (c1 + c2 + c3)).toFixed(2);
+  const motorVolt = +(hw.motor_voltage || 0).toFixed(2);
+  const cellDeltaMv = Math.round((hw.cell_delta || 0) * 1000);
+
+  const vib = +(hw.vibration || 0.25).toFixed(3);
+  const temp = +(hw.temperature || 30.0).toFixed(1);
+
+  const vals = {
+    vibX: vib,
+    vibY: +(vib * 0.82 + 0.02 * Math.sin(Date.now() / 600)).toFixed(3),
+    vibZ: +(vib * 0.68 + 0.02 * Math.cos(Date.now() / 800)).toFixed(3),
+    temp: temp,
+    current: motorCurr,
+    motorCurrent: motorCurr,
+    auxCurrent: auxCurr,
+    totalCurrent: totalCurr,
+    cell1: c1,
+    cell2: c2,
+    cell3: c3,
+    cell4: c4,
+    totalVoltage: totalVolt,
+    motorVoltage: motorVolt,
+    cellDeltaMv: cellDeltaMv,
+    kurtosis: +(2.8 + (vib > 1.2 ? vib * 0.6 : 0.2)).toFixed(2),
+  };
+
+  let health = 98.2;
+  let rulHours = 3200;
+  let rulLo = 2800;
+  let rulHi = 3600;
+  let status = 'NORMAL';
+
+  if (pred) {
+    if (pred.health_index !== undefined) {
+      health = +(pred.health_index > 1.0 ? pred.health_index : pred.health_index * 100).toFixed(1);
+    }
+    if (pred.rul_hours !== undefined) {
+      rulHours = Math.round(pred.rul_hours);
+    }
+    if (pred.confidence_interval) {
+      rulLo = Math.round(pred.confidence_interval[0]);
+      rulHi = Math.round(pred.confidence_interval[1]);
+    } else {
+      rulLo = Math.round(rulHours * 0.88);
+      rulHi = Math.round(rulHours * 1.12);
+    }
+    if (pred.status) {
+      status = pred.status.toUpperCase();
+    }
+  }
+
+  const rms = +(Math.sqrt((vals.vibX**2 + vals.vibY**2 + vals.vibZ**2) / 3) - Math.sqrt(BASELINE.vibX**2 + BASELINE.vibY**2 + BASELINE.vibZ**2) / Math.sqrt(3)).toFixed(4);
+  const kurtosis = vals.kurtosis;
+
+  let severity = null, event = null;
+  const alertStr = hw.alert || 'NONE';
+  if (alertStr === 'OVERCURRENT_TRIP') {
+    status = 'CRITICAL'; severity = 'critical'; event = 'Overcurrent Trip Triggered (>5A)';
+  } else if (alertStr === 'MANUAL_ESTOP') {
+    status = 'CRITICAL'; severity = 'critical'; event = 'Emergency Stop (E-STOP) Engaged';
+  } else if (alertStr === 'VIBRATION_HIGH') {
+    status = 'WARNING'; severity = 'warning'; event = 'High Vibration Anomaly Detected';
+  } else if (alertStr === 'OVERTEMP_TRIP') {
+    status = 'CRITICAL'; severity = 'critical'; event = 'Overtemperature Trip Triggered (>80°C)';
+  } else if (health < 40) {
+    status = 'CRITICAL'; severity = 'critical'; event = 'Health index below 40%';
+  } else if (health < 70) {
+    status = 'WARNING'; severity = 'warning'; event = 'Health index below 70%';
+  }
+
+  return { ts: new Date(), vals, health, rulHours, rulLo, rulHi, rms, kurtosis, status, severity, event };
+}
+
+// ─────────── MAIN TELEMETRY LOOP ───────────
 let tickCount = 0;
 let lastTelemetryReading = null;
+let isPollingTelemetry = false;
 
-function tick() {
-  if (!streaming) return;
+async function tick() {
+  if (!streaming || isPollingTelemetry) return;
+  isPollingTelemetry = true;
+
+  try {
+    const resp = await fetch('/api/telemetry', { cache: 'no-store' });
+    if (resp.ok) {
+      const json = await resp.json();
+      if (json.success && json.data && json.data.telemetry) {
+        const hw = json.data.telemetry;
+        const pred = json.data.prediction;
+        const isConnected = !!json.data.connected;
+
+        updateHardwareStatus(isConnected, json.data.port);
+        updateControlPanelFromHw(hw);
+
+        const r = transformHardwareTelemetry(hw, pred);
+        lastTelemetryReading = r;
+        updateKPIs(r);
+        updateTrajectory(r);
+        updateOsc(r);
+        updateLogTable(r);
+        updateAlerts(r);
+        if (currentPage === 'prognostics') refreshPrognostics();
+        tickCount++;
+        document.getElementById('liveHz').textContent = isConnected ? '5' : '2';
+        isPollingTelemetry = false;
+        return;
+      }
+    }
+  } catch (err) {
+    // Server or network unreachable
+  }
+
+  // Fallback to offline simulation engine
+  updateHardwareStatus(false, 'COM5');
   const r = simulateReading();
   lastTelemetryReading = r;
   updateKPIs(r);
@@ -1984,7 +2382,8 @@ function tick() {
   updateAlerts(r);
   if (currentPage === 'prognostics') refreshPrognostics();
   tickCount++;
-  document.getElementById('liveHz').textContent = (tickCount % 10 < 5) ? '2' : '2';
+  document.getElementById('liveHz').textContent = '2';
+  isPollingTelemetry = false;
 }
 
 window.getLiveTelemetry = function() {
@@ -1997,16 +2396,15 @@ window.getLiveTelemetry = function() {
       totalCurrent: 2.824,
       motorCurrent: 2.301,
       auxCurrent: 0.523,
-      totalVoltage: 14.82,
-      motorVoltage: 12.04,
-      cell1: 3.715,
-      cell2: 3.702,
-      cell3: 3.710,
-      cell4: 3.693,
-      cellDeltaMv: 22,
+      totalVoltage: 11.10,
+      motorVoltage: 9.80,
+      cell1: 3.700,
+      cell2: 3.700,
+      cell3: 3.700,
+      cellDeltaMv: 15,
       status: 'NORMAL',
-      topAxis: 'Vib Y',
-      temp: 42.0
+      topAxis: 'Vib X',
+      temp: 32.0
     };
   }
   const topAxis = lastTelemetryReading.vals.vibX > lastTelemetryReading.vals.vibY ? 'Vib X' : 'Vib Y';
@@ -2023,7 +2421,6 @@ window.getLiveTelemetry = function() {
     cell1: lastTelemetryReading.vals.cell1,
     cell2: lastTelemetryReading.vals.cell2,
     cell3: lastTelemetryReading.vals.cell3,
-    cell4: lastTelemetryReading.vals.cell4,
     cellDeltaMv: lastTelemetryReading.vals.cellDeltaMv,
     status: lastTelemetryReading.status,
     topAxis: topAxis,
@@ -2031,7 +2428,7 @@ window.getLiveTelemetry = function() {
   };
 };
 
-setInterval(tick, 500);
+setInterval(tick, 300);
 
 // Initial prognostics range group
 document.getElementById('progRangeGroup').addEventListener('click', e => {
@@ -2062,6 +2459,9 @@ window.addEventListener('load', () => {
 
   // Initialize Lucide icons (runs after all DOM is ready)
   if (typeof lucide !== 'undefined') lucide.createIcons();
+
+  // Initialize Motor Control Console UI
+  if (typeof renderMotorControlUI === 'function') renderMotorControlUI();
 
   // Sidebar entrance
   gsap.from('.sidebar', { x: -30, opacity: 0, duration: 0.5, ease: 'power3.out', clearProps: 'transform,opacity' });

@@ -600,6 +600,7 @@ svg.lucide {
 .btn-danger:hover:not(:disabled) { background: #b91c1c; }
 .btn-outline { background: transparent; color: var(--ink-strong); border-color: var(--border-firm); }
 .btn-outline:hover:not(:disabled) { border-color: var(--navy); color: var(--navy); }
+.btn-outline.is-active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
 .btn-sm { padding: 6px 13px; font-size: .78rem; min-height: 32px; }
 
 /* ══════════════════════════════════════════════════════════════════

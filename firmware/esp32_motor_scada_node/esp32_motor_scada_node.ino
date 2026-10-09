@@ -124,11 +124,24 @@ void IRAM_ATTR isr_encoder_clk() {
     int clk = digitalRead(PIN_ENC_CLK);
     int dt  = digitalRead(PIN_ENC_DT);
     if (clk != dt) {
-      if (encoder_position <= 235) encoder_position += 15;
-      else encoder_position = 250;
+      // Clockwise (increase speed)
+      if (encoder_position == 0) {
+        encoder_position = 150; // Jump to min operational PWM for RS-380 starting torque
+      } else if (encoder_position <= 245) {
+        encoder_position += 10;
+      } else {
+        encoder_position = 255;
+      }
+      motor_running = true;
+      safety_tripped = false;
     } else {
-      if (encoder_position >= 145) encoder_position -= 15;
-      else encoder_position = 130;
+      // Counter-clockwise (decrease speed)
+      if (encoder_position > 150) {
+        encoder_position -= 10;
+      } else {
+        encoder_position = 0; // Stop motor cleanly when dialed below min threshold
+        motor_running = false;
+      }
     }
     last_clk_time = now;
   }
@@ -393,16 +406,17 @@ void loop() {
   if (encoder_btn_pressed) {
     encoder_btn_pressed = false;
     if (safety_tripped) {
-      // Clear safety trip on manual knob button click
       safety_tripped = false;
       safety_trip_reason = "NONE";
       motor_running = true;
-      encoder_position = 160;
-      Serial.println("[RESET] Safety trip cleared. Motor resuming @ PWM 160.");
+      if (encoder_position < 140) encoder_position = 160;
+      Serial.printf("[RESET] Safety trip cleared. Motor resuming @ PWM %d.\n", encoder_position);
     } else {
       motor_running = !motor_running;
       if (motor_running) {
-        encoder_position = 160; // 63% speed default (clean starting torque)
+        if (encoder_position < 140) encoder_position = 160;
+      } else {
+        encoder_position = 0;
       }
       Serial.printf("[MANUAL] Motor State: %s (Target PWM: %d)\n",
                     motor_running ? "RUNNING" : "STOPPED", encoder_position);
@@ -414,11 +428,11 @@ void loop() {
   static unsigned long last_ramp_time = 0;
   if (millis() - last_ramp_time >= 15) {
     last_ramp_time = millis();
-    int desired_pwm = (motor_running && !safety_tripped) ? encoder_position : 0;
+    int desired_pwm = (motor_running && !safety_tripped && encoder_position > 0) ? encoder_position : 0;
     if (current_applied_pwm < desired_pwm) {
-      current_applied_pwm = min(desired_pwm, current_applied_pwm + 6);
+      current_applied_pwm = min(desired_pwm, current_applied_pwm + 8);
     } else if (current_applied_pwm > desired_pwm) {
-      current_applied_pwm = max(desired_pwm, current_applied_pwm - 12);
+      current_applied_pwm = max(desired_pwm, current_applied_pwm - 16);
     }
     apply_motor_speed(current_applied_pwm, motor_dir_forward);
     motor_pwm_target = current_applied_pwm;
@@ -458,24 +472,52 @@ void loop() {
                   safety_trip_reason.c_str());
   }
 
-  // Handle incoming Serial commands from Python SCADA (e.g., speed set, stop)
+  // Handle incoming Serial commands from Python SCADA (e.g., speed set, stop, start, reverse, estop, reset)
   if (Serial.available() > 0) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
     if (cmd.startsWith("SPEED=")) {
       int val = cmd.substring(6).toInt();
       encoder_position = constrain(val, 0, 255);
-      apply_motor_speed(encoder_position, motor_dir_forward);
+      if (encoder_position > 0) {
+        motor_running = true;
+        safety_tripped = false;
+        safety_trip_reason = "NONE";
+      } else {
+        motor_running = false;
+      }
+      Serial.printf("[CMD] Speed set to PWM %d (Running: %s)\n", encoder_position, motor_running ? "YES" : "NO");
     } else if (cmd == "STOP") {
       motor_running = false;
+      encoder_position = 0;
       apply_motor_speed(0, motor_dir_forward);
+      Serial.println("[CMD] Motor Stopped.");
     } else if (cmd == "START") {
       motor_running = true;
       safety_tripped = false;
-      apply_motor_speed(encoder_position, motor_dir_forward);
-    } else if (cmd == "REVERSE") {
+      safety_trip_reason = "NONE";
+      if (encoder_position < 140) encoder_position = 160;
+      Serial.printf("[CMD] Motor Started @ PWM %d\n", encoder_position);
+    } else if (cmd == "REVERSE" || cmd == "DIR=TOGGLE") {
       motor_dir_forward = !motor_dir_forward;
-      apply_motor_speed(encoder_position, motor_dir_forward);
+      Serial.printf("[CMD] Direction toggled: %s\n", motor_dir_forward ? "FWD" : "REV");
+    } else if (cmd == "DIR=FWD") {
+      motor_dir_forward = true;
+      Serial.println("[CMD] Direction set: FWD");
+    } else if (cmd == "DIR=REV") {
+      motor_dir_forward = false;
+      Serial.println("[CMD] Direction set: REV");
+    } else if (cmd == "ESTOP" || cmd == "EMERGENCY_STOP") {
+      motor_running = false;
+      safety_tripped = true;
+      safety_trip_reason = "MANUAL_ESTOP";
+      encoder_position = 0;
+      apply_motor_speed(0, motor_dir_forward);
+      Serial.println("[ALERT] EMERGENCY STOP ACTIVATED.");
+    } else if (cmd == "RESET" || cmd == "CLEAR_TRIP") {
+      safety_tripped = false;
+      safety_trip_reason = "NONE";
+      Serial.println("[RESET] Safety trip cleared.");
     }
   }
 }
