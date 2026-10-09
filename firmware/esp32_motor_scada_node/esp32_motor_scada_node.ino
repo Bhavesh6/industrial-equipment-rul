@@ -91,7 +91,7 @@ bool        motor_running        = false;      // Requires knob turn or 'START' 
 bool        motor_dir_forward    = true;
 
 // Safety Limit Thresholds (Emergency Trip)
-const float MAX_MOTOR_CURRENT_A  = 4.50;       // Stall trip threshold
+const float MAX_MOTOR_CURRENT_A  = 6.00;       // Stall trip threshold (allows startup headroom)
 const float MAX_MOTOR_TEMP_C     = 75.0;       // Thermal trip threshold
 const float MAX_VIBRATION_G      = 2.80;       // Severe imbalance / bearing seizure
 bool        safety_tripped       = false;
@@ -115,28 +115,28 @@ unsigned long last_telemetry_tx = 0;
 const unsigned long TELEMETRY_INTERVAL_MS = 200; // 5 Hz telemetry stream
 
 // ------------------------------------------------------------------------------
-// INTERRUPT SERVICE ROUTINES (KY-040 ENCODER)
+// INTERRUPT SERVICE ROUTINES (KY-040 ENCODER WITH HARDWARE DEBOUNCE)
 // ------------------------------------------------------------------------------
 void IRAM_ATTR isr_encoder_clk() {
-  int clk = digitalRead(PIN_ENC_CLK);
-  int dt  = digitalRead(PIN_ENC_DT);
-  if (clk != dt) {
-    if (encoder_position < 255) encoder_position += 5;
-  } else {
-    if (encoder_position > 0) encoder_position -= 5;
+  static unsigned long last_clk_time = 0;
+  unsigned long now = millis();
+  if (now - last_clk_time > 8) { // 8ms contact bounce suppression
+    int clk = digitalRead(PIN_ENC_CLK);
+    int dt  = digitalRead(PIN_ENC_DT);
+    if (clk != dt) {
+      if (encoder_position <= 245) encoder_position += 10;
+      else encoder_position = 255;
+    } else {
+      if (encoder_position >= 10) encoder_position -= 10;
+      else encoder_position = 0;
+    }
+    last_clk_time = now;
   }
-  
-  // Track pulse frequency for RPM / tachometer estimation
-  unsigned long now = micros();
-  if (now > last_enc_pulse_time) {
-    enc_pulse_interval = now - last_enc_pulse_time;
-  }
-  last_enc_pulse_time = now;
 }
 
 void IRAM_ATTR isr_encoder_btn() {
   static unsigned long last_btn_press = 0;
-  if (millis() - last_btn_press > 250) { // Software debounce
+  if (millis() - last_btn_press > 300) { // Software debounce
     encoder_btn_pressed = true;
     last_btn_press = millis();
   }
@@ -289,25 +289,44 @@ int calculate_rpm() {
 }
 
 // ------------------------------------------------------------------------------
-// SAFETY INTERLOCK MONITOR
+// SAFETY INTERLOCK MONITOR WITH INRUSH / NOISE SUPPRESSION
 // ------------------------------------------------------------------------------
 void check_safety_limits(float i_motor, float temp_c, float vib_g) {
   if (safety_tripped) return;
 
+  // 1. Overcurrent trip with 350ms duration persistence (ignores startup inrush)
+  static unsigned long oc_start_time = 0;
   if (i_motor > MAX_MOTOR_CURRENT_A) {
-    safety_tripped = true;
-    safety_trip_reason = "OVERCURRENT_TRIP";
-  } else if (temp_c > MAX_MOTOR_TEMP_C) {
+    if (oc_start_time == 0) oc_start_time = millis();
+    else if (millis() - oc_start_time > 350) {
+      safety_tripped = true;
+      safety_trip_reason = "OVERCURRENT_TRIP";
+    }
+  } else {
+    oc_start_time = 0;
+  }
+
+  // 2. Vibration breach with 400ms duration persistence
+  static unsigned long vib_start_time = 0;
+  if (vib_g > MAX_VIBRATION_G) {
+    if (vib_start_time == 0) vib_start_time = millis();
+    else if (millis() - vib_start_time > 400) {
+      safety_tripped = true;
+      safety_trip_reason = "VIBRATION_LIMIT_BREACH";
+    }
+  } else {
+    vib_start_time = 0;
+  }
+
+  // 3. Overtemperature trip (immediate)
+  if (temp_c > MAX_MOTOR_TEMP_C) {
     safety_tripped = true;
     safety_trip_reason = "OVERTEMP_TRIP";
-  } else if (vib_g > MAX_VIBRATION_G) {
-    safety_tripped = true;
-    safety_trip_reason = "VIBRATION_LIMIT_BREACH";
   }
 
   if (safety_tripped) {
     apply_motor_speed(0, true);
-    Serial.printf("[ALERT] EMERGENCY TRIP TRIGGERED: %s\n", safety_trip_reason.c_str());
+    Serial.printf("\n[ALERT] EMERGENCY TRIP TRIGGERED: %s\n", safety_trip_reason.c_str());
   }
 }
 
@@ -377,18 +396,31 @@ void loop() {
       safety_tripped = false;
       safety_trip_reason = "NONE";
       motor_running = true;
-      Serial.println("[RESET] Safety trip acknowledged and cleared.");
+      if (encoder_position < 80) encoder_position = 120;
+      Serial.println("[RESET] Safety trip cleared. Motor resuming.");
     } else {
       motor_running = !motor_running;
-      Serial.printf("[MANUAL] Motor State toggled: %s\n", motor_running ? "RUNNING" : "STOPPED");
+      if (motor_running && encoder_position < 60) {
+        encoder_position = 120; // Default to ~47% smooth demo speed on start
+      }
+      Serial.printf("[MANUAL] Motor State: %s (Target PWM: %d)\n",
+                    motor_running ? "RUNNING" : "STOPPED", encoder_position);
     }
-    apply_motor_speed(motor_running ? encoder_position : 0, motor_dir_forward);
   }
 
-  // Update PWM from rotary encoder knob position
-  if (motor_running && !safety_tripped) {
-    motor_pwm_target = encoder_position;
-    apply_motor_speed(motor_pwm_target, motor_dir_forward);
+  // Soft-start slew rate limiter (prevents startup inrush current spike)
+  static int current_applied_pwm = 0;
+  static unsigned long last_ramp_time = 0;
+  if (millis() - last_ramp_time >= 15) {
+    last_ramp_time = millis();
+    int desired_pwm = (motor_running && !safety_tripped) ? encoder_position : 0;
+    if (current_applied_pwm < desired_pwm) {
+      current_applied_pwm = min(desired_pwm, current_applied_pwm + 6);
+    } else if (current_applied_pwm > desired_pwm) {
+      current_applied_pwm = max(desired_pwm, current_applied_pwm - 12);
+    }
+    apply_motor_speed(current_applied_pwm, motor_dir_forward);
+    motor_pwm_target = current_applied_pwm;
   }
 
   // Periodic Telemetry Acquisition & Transmission
