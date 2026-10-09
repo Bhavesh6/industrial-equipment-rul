@@ -27,5 +27,6 @@ Thumbs.db
 # Scratch, templates, and agent artifacts
 scratch/
 templates/
+smart-factory-digital-twin/
 .agents/
 *.log
