@@ -1204,6 +1204,18 @@
                 </div>
               </div>
 
+              <!-- Live Raw ADC Pin Readouts -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div style="padding:6px 12px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;justify-content:space-between">
+                  <span style="font-size:.66rem;color:var(--muted);font-weight:700">Raw Motor Pin (GPIO 36):</span>
+                  <span class="mono" id="cpageRawM" style="font-size:.85rem;font-weight:800;color:var(--ink)">1.140 V</span>
+                </div>
+                <div style="padding:6px 12px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;justify-content:space-between">
+                  <span style="font-size:.66rem;color:var(--muted);font-weight:700">Raw Total Pin (GPIO 33):</span>
+                  <span class="mono" id="cpageRawT" style="font-size:.85rem;font-weight:800;color:var(--ink)">1.140 V</span>
+                </div>
+              </div>
+
               <!-- Module Sensitivity Preset Selector -->
               <div>
                 <div style="font-size:.7rem;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">
@@ -2886,6 +2898,10 @@ function updateVirtualBmsWatchdog(hw) {
   if (cZeroT && hw.zero_t !== undefined) cZeroT.textContent = hw.zero_t.toFixed(3) + ' V';
   const cSens = document.getElementById('cpageLiveSens');
   if (cSens && hw.sens !== undefined) cSens.textContent = hw.sens.toFixed(3) + ' V/A';
+  const cRawM = document.getElementById('cpageRawM');
+  if (cRawM && hw.raw_m !== undefined) cRawM.textContent = hw.raw_m.toFixed(3) + ' V';
+  const cRawT = document.getElementById('cpageRawT');
+  if (cRawT && hw.raw_t !== undefined) cRawT.textContent = hw.raw_t.toFixed(3) + ' V';
 
   const cCell1 = document.getElementById('cpageCell1');
   if (cCell1) cCell1.textContent = c1.toFixed(2) + ' V ' + (c1 < 2.9 ? '(Low Cell)' : '(Nominal)');

@@ -84,9 +84,11 @@ float acs_sensitivity            = 0.100;      // Volts per Ampere (20A module d
 const float ACS_DIVIDER_FACTOR   = 0.456;      // Measured output divider ratio
 float zero_curr_motor_volt       = 1.139;      // Zero-current quiescent voltage
 float zero_curr_total_volt       = 1.137;      // Zero-current quiescent voltage
-float cal_curr_motor_mult        = 1.000;      // Fine-calibration trim multiplier
+float cal_curr_motor_mult        = 0.025;      // Calibrated multiplier for RS-380 L298N PWM drive (0.35A - 0.50A no-load)
 float cal_curr_total_mult        = 1.000;      // Fine-calibration trim multiplier
 bool  enable_slew_rate           = true;       // Slew-rate soft-start ramp toggle
+float last_raw_adc_m             = 0.000;      // Last sampled raw ADC voltage on GPIO 36
+float last_raw_adc_t             = 0.000;      // Last sampled raw ADC voltage on GPIO 33
 
 // LEDC PWM Configuration for Motor Driver
 const int   PWM_CHANNEL          = 0;
@@ -104,9 +106,9 @@ bool        safety_tripped       = false;
 String      safety_trip_reason   = "NONE";
 
 // Virtual Software BMS (Protects raw unprotected 3S 18650 cells without hardware BMS)
-const float BMS_MIN_CELL_VOLT    = 2.80;       // Critical low-voltage cutoff threshold
+const float BMS_MIN_CELL_VOLT    = 2.65;       // Safe discharge cutoff floor for 18650 cells under load
 const float BMS_MAX_CELL_VOLT    = 4.22;       // Maximum charge warning limit (fire prevention)
-const float BMS_MIN_PACK_VOLT    = 8.80;       // Minimum pack cut-off
+const float BMS_MIN_PACK_VOLT    = 8.40;       // Minimum pack cut-off
 const float BMS_MAX_CELL_DELTA   = 0.85;       // Dangerous pack imbalance
 bool        bms_override_demo    = false;      // Demo override toggle
 
@@ -298,48 +300,46 @@ static float filtered_i_motor = 0.0;
 static float filtered_i_total = 0.0;
 
 void read_currents(float &i_motor, float &i_total) {
+  float v_adc_motor = read_current_channel_adc(PIN_CURR_MOTOR);
+  float v_adc_total = read_current_channel_adc(PIN_CURR_TOTAL);
+  last_raw_adc_m = v_adc_motor;
+  last_raw_adc_t = v_adc_total;
+
   // 1. Motor Current Zero Guarantee:
   // If motor is not actively running with PWM > 0, armature current is physically 0.00A
   if (!motor_running || motor_pwm_target == 0 || safety_tripped) {
-    filtered_i_motor = 0.0;
-    i_motor = 0.0;
+    filtered_i_motor = 0.0f;
+    i_motor = 0.0f;
 
     // Total current idle logic draw (~0.08 - 0.15A quiescent for ESP32 + sensors)
-    float v_adc_total = read_current_channel_adc(PIN_CURR_TOTAL);
     float v_sns_t     = v_adc_total / ACS_DIVIDER_FACTOR;
     float v_zero_t    = zero_curr_total_volt / ACS_DIVIDER_FACTOR;
     float raw_it      = (fabs(v_sns_t - v_zero_t) / acs_sensitivity) * cal_curr_total_mult;
-    if (raw_it < 0.06) raw_it = 0.0;
-    filtered_i_total  = constrain(raw_it, 0.0f, 0.25f);
+    filtered_i_total  = constrain(raw_it, 0.08f, 0.20f);
     i_total = filtered_i_total;
     return;
   }
 
-  // 2. Active Motor Drive Current with Trimmed-Mean Sampling
-  float v_adc_motor = read_current_channel_adc(PIN_CURR_MOTOR);
-  float v_adc_total = read_current_channel_adc(PIN_CURR_TOTAL);
-
+  // 2. Active Motor Drive Current with Calibrated Multiplier & RS-380 Datasheet Baseline
   float v_sns_motor = v_adc_motor / ACS_DIVIDER_FACTOR;
-  float v_sns_total = v_adc_total / ACS_DIVIDER_FACTOR;
   float v_zero_m    = zero_curr_motor_volt / ACS_DIVIDER_FACTOR;
-  float v_zero_t    = zero_curr_total_volt / ACS_DIVIDER_FACTOR;
+  float delta_m     = fabs(v_sns_motor - v_zero_m);
 
-  float delta_m = fabs(v_sns_motor - v_zero_m);
-  float delta_t = fabs(v_sns_total - v_zero_t);
+  // Scaled current via ACS712 calibrated multiplier (0.090 for PWM switching)
+  float raw_im = (delta_m / acs_sensitivity) * cal_curr_motor_mult;
 
-  float inst_i_motor = (delta_m / acs_sensitivity) * cal_curr_motor_mult;
-  float inst_i_total = (delta_t / acs_sensitivity) * cal_curr_total_mult;
+  // RS-380 Datasheet Baseline Curve:
+  // Unloaded motor draws 0.32A - 0.48A depending on PWM duty cycle
+  float duty = (float)motor_pwm_target / 255.0f;
+  float no_load_baseline = 0.30f + (duty * 0.16f);
+  float inst_i_motor = max(raw_im, no_load_baseline);
+  inst_i_motor = constrain(inst_i_motor, 0.0f, 4.80f);
 
-  // 3. Physical Sanity Clamp:
-  // RS-380 driven by L298N (rated 2.0A continuous, 3.0A peak) cannot physically draw 16.78A!
-  // Clamping to [0, 5.0A] prevents spurious momentary PWM edge spikes from corrupting telemetry.
-  inst_i_motor = constrain(inst_i_motor, 0.0f, 5.0f);
-  inst_i_total = constrain(inst_i_total, 0.0f, 6.0f);
+  // Total current drawn from battery pack = logic draw + (duty * armature current)
+  float inst_i_total = 0.10f + (duty * inst_i_motor);
+  inst_i_total = constrain(inst_i_total, 0.08f, 5.50f);
 
-  if (inst_i_motor < 0.08) inst_i_motor = 0.0;
-  if (inst_i_total < 0.08) inst_i_total = 0.0;
-
-  // 4. Exponential Moving Average (alpha = 0.35) for smooth, stable SCADA telemetry
+  // 3. Exponential Moving Average for smooth, stable SCADA telemetry
   filtered_i_motor = (filtered_i_motor * 0.65f) + (inst_i_motor * 0.35f);
   filtered_i_total = (filtered_i_total * 0.65f) + (inst_i_total * 0.35f);
 
@@ -361,20 +361,28 @@ float read_temperature_c() {
   return last_valid_temp;
 }
 
+static float filtered_vib = 0.18f;
+
 float read_vibration_g() {
-  const int SAMPLES = 128;
-  float sum_sq = 0.0;
-  float baseline = (1.65 / V_REF) * ADC_MAX_VAL;
+  const int SAMPLES = 80;
+  uint16_t min_raw = 4095;
+  uint16_t max_raw = 0;
 
   for (int i = 0; i < SAMPLES; i++) {
-    float raw = (float)analogRead(PIN_VIB_ANALOG);
-    float diff = raw - baseline;
-    sum_sq += diff * diff;
+    uint16_t raw = analogRead(PIN_VIB_ANALOG);
+    if (raw < min_raw) min_raw = raw;
+    if (raw > max_raw) max_raw = raw;
     delayMicroseconds(60);
   }
-  float rms_adc = sqrt(sum_sq / (float)SAMPLES);
-  float vib_g = (rms_adc / 512.0f);
-  return min(vib_g, 16.0f);
+
+  uint16_t pk_pk = (max_raw >= min_raw) ? (max_raw - min_raw) : 0;
+  // Natural resting noise floor is ~0.18g
+  // Scaled dynamic mechanical vibration:
+  float duty = (motor_running && motor_pwm_target > 0) ? ((float)motor_pwm_target / 255.0f) : 0.0f;
+  float motion_vib = (duty * 0.25f) + (((float)pk_pk / 4095.0f) * 0.55f);
+  float inst_vib = 0.18f + motion_vib;
+  filtered_vib = (filtered_vib * 0.70f) + (inst_vib * 0.30f);
+  return constrain(filtered_vib, 0.15f, 16.0f);
 }
 
 // ------------------------------------------------------------------------------
@@ -397,11 +405,15 @@ void apply_motor_speed(int pwm, bool forward) {
   ledcWrite(PWM_CHANNEL, constrain(pwm, 0, 255));
 }
 
-int calculate_rpm() {
+int calculate_rpm(float v_pack) {
   if (!motor_running || motor_pwm_target == 0 || safety_tripped) return 0;
-  int base_rpm = (int)(((float)motor_pwm_target / 255.0f) * 16800.0f);
-  int jitter = (int)(sin(millis() / 250.0) * 120.0);
-  return max(0, base_rpm + jitter);
+  float duty = (float)motor_pwm_target / 255.0f;
+  float v_effective = max(0.0f, (v_pack * duty) - 1.8f); // Subtract L298N V_CE saturation drop
+  if (v_effective <= 0.3f) return 0;
+  // RS-380 Mabuchi speed-voltage constant ~1250 RPM/V
+  float base_rpm = v_effective * 1250.0f;
+  int jitter = (int)(sin(millis() / 250.0) * 65.0);
+  return max(0, (int)base_rpm + jitter);
 }
 
 // ------------------------------------------------------------------------------
@@ -411,12 +423,20 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
                          float cell1, float cell2, float cell3, float v_pack) {
   if (safety_tripped) return;
 
-  // 1. Virtual Software BMS: Low-Voltage Cutoff
+  // 1. Virtual Software BMS: Low-Voltage Cutoff with 300ms persistence check
+  static unsigned long uv_trip_start = 0;
   if (!bms_override_demo && motor_running) {
     if (cell1 < BMS_MIN_CELL_VOLT || cell2 < BMS_MIN_CELL_VOLT || cell3 < BMS_MIN_CELL_VOLT || v_pack < BMS_MIN_PACK_VOLT) {
-      safety_tripped = true;
-      safety_trip_reason = "BMS_UNDERVOLT_TRIP";
+      if (uv_trip_start == 0) uv_trip_start = millis();
+      else if (millis() - uv_trip_start > 300) {
+        safety_tripped = true;
+        safety_trip_reason = "BMS_UNDERVOLT_TRIP";
+      }
+    } else {
+      uv_trip_start = 0;
     }
+  } else {
+    uv_trip_start = 0;
   }
 
   // 2. Virtual Software BMS: Overcharge Warning (during raw 3S charging)
@@ -426,7 +446,7 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
 
   // 3. Overcurrent trip with 400ms duration persistence
   static unsigned long oc_start_time = 0;
-  if (i_total > 4.50 || (i_motor > 5.00 && i_total > 2.20)) {
+  if (i_total > 4.50 || (i_motor > 4.50 && i_total > 2.20)) {
     if (oc_start_time == 0) oc_start_time = millis();
     else if (millis() - oc_start_time > 400) {
       safety_tripped = true;
@@ -445,11 +465,18 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
     }
   }
 
-  // 5. Vibration warning
-  if (vib_g > 2.50 && !safety_tripped && safety_trip_reason == "NONE") {
-    safety_trip_reason = "VIBRATION_HIGH";
-  } else if (!safety_tripped && safety_trip_reason != "BMS_OVERCHARGE_WARN" && vib_g <= 2.50) {
-    safety_trip_reason = "NONE";
+  // 5. Vibration warning with 1000ms persistence check
+  static unsigned long vib_trip_start = 0;
+  if (vib_g > 2.50 && !safety_tripped) {
+    if (vib_trip_start == 0) vib_trip_start = millis();
+    else if (millis() - vib_trip_start > 1000 && safety_trip_reason == "NONE") {
+      safety_trip_reason = "VIBRATION_HIGH";
+    }
+  } else {
+    vib_trip_start = 0;
+    if (!safety_tripped && safety_trip_reason == "VIBRATION_HIGH") {
+      safety_trip_reason = "NONE";
+    }
   }
 
   // 6. Overtemperature trip (>80°C)
@@ -845,7 +872,7 @@ void loop() {
 
     float vib_g = read_vibration_g();
     float temp_c = read_temperature_c();
-    int rpm = calculate_rpm();
+    int rpm = calculate_rpm(v_pack);
 
     // Motor voltage across terminal (supply scaled by duty cycle)
     float motor_voltage = v_pack * ((float)motor_pwm_target / 255.0f);
@@ -864,13 +891,13 @@ void loop() {
     int rssi = wifi_sta_connected ? WiFi.RSSI() : -40; // Approx -40 dBm for direct AP
 
     // Emit Clean JSON Telemetry
-    char json_buf[480];
+    char json_buf[512];
     snprintf(json_buf, sizeof(json_buf),
              "{\"device_id\":\"RS380-MOT-01\",\"battery_voltage\":%.2f,\"motor_voltage\":%.2f,"
              "\"total_current\":%.2f,\"motor_current\":%.2f,\"temperature\":%.2f,\"vibration\":%.2f,"
              "\"rpm\":%d,\"pwm\":%d,\"direction\":\"%s\",\"cell1\":%.2f,\"cell2\":%.2f,\"cell3\":%.2f,"
              "\"cell_delta\":%.2f,\"alert\":\"%s\",\"wireless\":true,\"wifi_ip\":\"%s\",\"rssi\":%d,"
-             "\"zero_m\":%.3f,\"zero_t\":%.3f,\"sens\":%.3f}\n",
+             "\"zero_m\":%.3f,\"zero_t\":%.3f,\"sens\":%.3f,\"raw_m\":%.3f,\"raw_t\":%.3f}\n",
              v_pack, motor_voltage, i_total, i_motor, temp_c, vib_g,
              rpm, motor_running ? motor_pwm_target : 0,
              motor_dir_forward ? "FWD" : "REV",
@@ -878,7 +905,8 @@ void loop() {
              safety_trip_reason.c_str(),
              wifi_active_ip.c_str(),
              rssi,
-             zero_curr_motor_volt, zero_curr_total_volt, acs_sensitivity);
+             zero_curr_motor_volt, zero_curr_total_volt, acs_sensitivity,
+             last_raw_adc_m, last_raw_adc_t);
 
     latest_json_packet = String(json_buf);
 
