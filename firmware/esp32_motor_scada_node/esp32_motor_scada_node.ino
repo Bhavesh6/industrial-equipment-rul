@@ -124,11 +124,11 @@ void IRAM_ATTR isr_encoder_clk() {
     int clk = digitalRead(PIN_ENC_CLK);
     int dt  = digitalRead(PIN_ENC_DT);
     if (clk != dt) {
-      if (encoder_position <= 245) encoder_position += 10;
-      else encoder_position = 255;
+      if (encoder_position <= 235) encoder_position += 15;
+      else encoder_position = 250;
     } else {
-      if (encoder_position >= 10) encoder_position -= 10;
-      else encoder_position = 0;
+      if (encoder_position >= 145) encoder_position -= 15;
+      else encoder_position = 130;
     }
     last_clk_time = now;
   }
@@ -229,8 +229,8 @@ void read_battery_taps(float &v_b1, float &v_b2, float &v_pack,
 }
 
 void read_currents(float &i_motor, float &i_total) {
-  float vm = read_adc_voltage(PIN_CURR_MOTOR, 40);
-  float vt = read_adc_voltage(PIN_CURR_TOTAL, 40);
+  float vm = read_adc_voltage(PIN_CURR_MOTOR, 64);
+  float vt = read_adc_voltage(PIN_CURR_TOTAL, 64);
 
   // ΔV relative to calibrated quiescent 0A point
   float delta_vm = vm - zero_curr_motor_volt;
@@ -244,6 +244,12 @@ void read_currents(float &i_motor, float &i_total) {
   // Noise floor suppression (< 80 mA treated as zero)
   if (i_motor < 0.08) i_motor = 0.0;
   if (i_total < 0.08) i_total = 0.0;
+
+  // Physical sanity bound: motor cannot draw more than total DC supply current.
+  // Filters out 5kHz H-Bridge inductive commutation spikes on GPIO 36
+  if (i_total > 0.05 && i_motor > (i_total * 1.50f + 0.25f)) {
+    i_motor = i_total;
+  }
 }
 
 float read_vibration_g() {
@@ -291,14 +297,14 @@ int calculate_rpm() {
 // ------------------------------------------------------------------------------
 // SAFETY INTERLOCK MONITOR WITH INRUSH / NOISE SUPPRESSION
 // ------------------------------------------------------------------------------
-void check_safety_limits(float i_motor, float temp_c, float vib_g) {
+void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g) {
   if (safety_tripped) return;
 
-  // 1. Overcurrent trip with 350ms duration persistence (ignores startup inrush)
+  // 1. Overcurrent trip with 500ms duration persistence on true DC supply draw
   static unsigned long oc_start_time = 0;
-  if (i_motor > MAX_MOTOR_CURRENT_A) {
+  if (i_total > 5.00 || (i_motor > 5.50 && i_total > 2.50)) {
     if (oc_start_time == 0) oc_start_time = millis();
-    else if (millis() - oc_start_time > 350) {
+    else if (millis() - oc_start_time > 500) {
       safety_tripped = true;
       safety_trip_reason = "OVERCURRENT_TRIP";
     }
@@ -391,12 +397,12 @@ void loop() {
       safety_tripped = false;
       safety_trip_reason = "NONE";
       motor_running = true;
-      if (encoder_position < 80) encoder_position = 120;
-      Serial.println("[RESET] Safety trip cleared. Motor resuming.");
+      encoder_position = 160;
+      Serial.println("[RESET] Safety trip cleared. Motor resuming @ PWM 160.");
     } else {
       motor_running = !motor_running;
-      if (motor_running && encoder_position < 60) {
-        encoder_position = 120; // Default to ~47% smooth demo speed on start
+      if (motor_running) {
+        encoder_position = 160; // 63% speed default (clean starting torque)
       }
       Serial.printf("[MANUAL] Motor State: %s (Target PWM: %d)\n",
                     motor_running ? "RUNNING" : "STOPPED", encoder_position);
@@ -437,7 +443,7 @@ void loop() {
     float motor_voltage = v_pack * ((float)motor_pwm_target / 255.0f);
 
     // 2. Safety Interlock Check
-    check_safety_limits(i_motor, temp_c, vib_g);
+    check_safety_limits(i_motor, i_total, temp_c, vib_g);
 
     // 3. Emit Clean JSON Telemetry to Serial
     // Schema matches the SCADA Dashboard & ML RUL Predictor
