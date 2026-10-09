@@ -35,6 +35,13 @@ except Exception as e:
     chatbot_backend = None
     print(f"Warning: could not import backend.chatbot: {e}")
 
+try:
+    from src.models.predict import RULPredictor
+    ml_predictor = RULPredictor()
+except Exception as e:
+    ml_predictor = None
+    print(f"Warning: could not load ML predictor: {e}")
+
 
 class SCADAHandler(SimpleHTTPRequestHandler):
     def end_headers(self):
@@ -50,7 +57,47 @@ class SCADAHandler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
+    def do_GET(self):
+        clean_path = self.path.split("?")[0].rstrip("/")
+        if clean_path == "/api/model-info":
+            metrics_path = Path(__file__).resolve().parent.parent / "models" / "metrics.json"
+            if metrics_path.exists():
+                try:
+                    with open(metrics_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    self._send_json(200, {"success": True, "data": data})
+                    return
+                except Exception as e:
+                    self._send_json(500, {"success": False, "error": str(e)})
+                    return
+            self._send_json(404, {"success": False, "message": "Model metrics not found"})
+            return
+
+        super().do_GET()
+
     def do_POST(self):
+        clean_path = self.path.split("?")[0].rstrip("/")
+        if clean_path == "/api/predict":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                raw_body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+                data = json.loads(raw_body)
+            except Exception as e:
+                self._send_json(400, {"success": False, "message": f"Malformed JSON request: {e}"})
+                return
+
+            telemetry = data.get("telemetry") or data
+            if ml_predictor is not None:
+                try:
+                    res = ml_predictor.predict(telemetry)
+                    self._send_json(200, {"success": True, "prediction": res})
+                    return
+                except Exception as e:
+                    self._send_json(500, {"success": False, "error": str(e)})
+                    return
+            self._send_json(503, {"success": False, "message": "ML predictor not initialized"})
+            return
+
         clean_path = self.path.split("?")[0].rstrip("/")
         if clean_path == "/api/chat":
             try:

@@ -1,18 +1,30 @@
 """
 Health Index, RUL, Uncertainty Quantification, and Explainability Engine
-Implementation of the rule-based prognostic formulas for the RS-380 DC Motor testbed.
+========================================================================
+Integrates trained Machine Learning pipelines (Gradient Boosting & Random Forest)
+for Remaining Useful Life (RUL) prediction, Isolation Forest anomaly scoring,
+and per-sensor diagnostic attribution against the RS-380 healthy baseline.
 """
 
 import json
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import numpy as np
+
+# Import ML inference engine
+try:
+    from src.models.predict import RULPredictor
+except ImportError:
+    try:
+        from models.predict import RULPredictor
+    except ImportError:
+        RULPredictor = None
 
 
 class HealthEngine:
     """
     Computes Health Index (H), Remaining Useful Life (RUL) with 95% Confidence Bounds,
-    and SHAP-like Feature Contribution (Explainability) against a healthy baseline.
+    and Feature Contribution (Explainability) using trained ML models or baseline heuristics.
     """
 
     def __init__(self, baseline_config_path: str = None):
@@ -38,13 +50,14 @@ class HealthEngine:
         self.h_initial = 1.0
         self.baseline_h_std = 0.025
 
+        # Initialize ML Predictor
+        self.ml_predictor = RULPredictor() if RULPredictor is not None else None
+
     def evaluate(self, readings: Dict[str, float]) -> Dict[str, Any]:
         """
         Calculates health metrics given a dictionary of raw sensor readings.
-
-        Formula:
-            H = 1 - RMS( sum( w_i * [ (x_i - mu_i) / sigma_i ]^2 ) )
-            RUL = L0 * (H - H_fail) / (H0 - H_fail)
+        Uses trained ML pipeline (GradientBoosting / RF) when available,
+        falling back to rule-based formulas.
         """
         weighted_sq_deviations = {}
         total_weighted_sq_dev = 0.0
@@ -61,21 +74,38 @@ class HealthEngine:
             total_weighted_sq_dev += weighted_dev
 
         rms_deviation = float(np.sqrt(total_weighted_sq_dev))
-        health_index = float(max(0.0, min(1.0, 1.0 - (rms_deviation * 0.12))))
 
-        # Remaining Useful Life (RUL)
-        if health_index > self.failure_threshold:
-            rul_fraction = (health_index - self.failure_threshold) / (self.h_initial - self.failure_threshold)
-            rul_hours = max(0.0, self.nominal_lifetime * rul_fraction)
+        # Check ML prediction first
+        ml_res = None
+        if self.ml_predictor and self.ml_predictor.is_ml_ready:
+            try:
+                ml_res = self.ml_predictor.predict(readings)
+            except Exception as e:
+                ml_res = None
+
+        if ml_res:
+            health_index = ml_res["health_index"]
+            rul_hours = ml_res["rul_hours"]
+            rul_ci_low = ml_res["rul_ci_low"]
+            rul_ci_high = ml_res["rul_ci_high"]
+            anomaly_score = ml_res.get("anomaly_score", 0.0)
+            model_used = ml_res.get("model_used", "GradientBoosting")
         else:
-            rul_hours = max(0.0, (health_index / self.failure_threshold) * 0.5)
+            # Rule-based fallback
+            health_index = float(max(0.0, min(1.0, 1.0 - (rms_deviation * 0.12))))
+            if health_index > self.failure_threshold:
+                rul_fraction = (health_index - self.failure_threshold) / (self.h_initial - self.failure_threshold)
+                rul_hours = max(0.0, self.nominal_lifetime * rul_fraction)
+            else:
+                rul_hours = max(0.0, (health_index / self.failure_threshold) * 0.5)
 
-        # 95% Confidence Bounds (Uncertainty)
-        sigma_rul = (self.nominal_lifetime / (self.h_initial - self.failure_threshold)) * self.baseline_h_std
-        rul_ci_low = max(0.0, rul_hours - 1.96 * sigma_rul)
-        rul_ci_high = max(0.0, rul_hours + 1.96 * sigma_rul)
+            sigma_rul = (self.nominal_lifetime / (self.h_initial - self.failure_threshold)) * self.baseline_h_std
+            rul_ci_low = max(0.0, rul_hours - 1.96 * sigma_rul)
+            rul_ci_high = max(0.0, rul_hours + 1.96 * sigma_rul)
+            anomaly_score = float(min(1.0, rms_deviation * 0.2))
+            model_used = "RuleBasedFallback"
 
-        # SHAP-like attribution percentages
+        # Sensor attribution percentages
         contributions = {}
         if total_weighted_sq_dev > 0:
             for sensor, dev in weighted_sq_deviations.items():
@@ -101,6 +131,8 @@ class HealthEngine:
             "rul_hours": round(rul_hours, 2),
             "rul_ci_low": round(rul_ci_low, 2),
             "rul_ci_high": round(rul_ci_high, 2),
+            "anomaly_score": round(anomaly_score, 3),
+            "model_used": model_used,
             "contributions": contributions,
             "top_contributor": top_contributor,
             "top_contributor_pct": contributions[top_contributor],

@@ -1,0 +1,101 @@
+{
+  "description": "RS-380 brushed DC motor run-to-failure dataset (physics-informed synthetic)",
+  "methodology": "Weibull degradation curves + rolling statistical feature engineering",
+  "n_samples": 21300,
+  "n_lifecycles": 120,
+  "fault_modes": [
+    "overload",
+    "healthy",
+    "imbalance",
+    "thermal_runaway"
+  ],
+  "mode_counts": {
+    "healthy": 40,
+    "imbalance": 35,
+    "overload": 33,
+    "thermal_runaway": 12
+  },
+  "rul_min_h": 0.0,
+  "rul_max_h": 16.0,
+  "health_range": [
+    0.0,
+    0.9777
+  ],
+  "sensors": [
+    "battery_voltage",
+    "motor_voltage",
+    "total_current",
+    "motor_current",
+    "temperature",
+    "vibration"
+  ],
+  "feature_cols": [
+    "vibration",
+    "temperature",
+    "motor_current",
+    "total_current",
+    "motor_voltage",
+    "battery_voltage",
+    "battery_voltage_rms",
+    "battery_voltage_roll_mean",
+    "battery_voltage_roll_std",
+    "battery_voltage_delta",
+    "motor_voltage_rms",
+    "motor_voltage_roll_mean",
+    "motor_voltage_roll_std",
+    "motor_voltage_delta",
+    "total_current_rms",
+    "total_current_roll_mean",
+    "total_current_roll_std",
+    "total_current_delta",
+    "motor_current_rms",
+    "motor_current_roll_mean",
+    "motor_current_roll_std",
+    "motor_current_delta",
+    "temperature_rms",
+    "temperature_roll_mean",
+    "temperature_roll_std",
+    "temperature_delta",
+    "vibration_rms",
+    "vibration_roll_mean",
+    "vibration_roll_std",
+    "vibration_delta",
+    "power_w",
+    "voltage_ratio",
+    "thermal_stress"
+  ],
+  "baseline": {
+    "battery_voltage": {
+      "mean": 12.2,
+      "std": 0.12
+    },
+    "motor_voltage": {
+      "mean": 11.8,
+      "std": 0.15
+    },
+    "total_current": {
+      "mean": 2.1,
+      "std": 0.1
+    },
+    "motor_current": {
+      "mean": 1.85,
+      "std": 0.08
+    },
+    "temperature": {
+      "mean": 38.0,
+      "std": 1.2
+    },
+    "vibration": {
+      "mean": 0.35,
+      "std": 0.05
+    }
+  },
+  "sensor_weights": {
+    "battery_voltage": 0.05,
+    "motor_voltage": 0.15,
+    "total_current": 0.05,
+    "motor_current": 0.25,
+    "temperature": 0.25,
+    "vibration": 0.25
+  }
+}
