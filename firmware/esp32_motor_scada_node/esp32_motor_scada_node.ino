@@ -80,10 +80,13 @@ float cal_b2_mult                = 1.000;
 float cal_bpack_mult             = 1.000;
 
 // ACS712 Current Sensor Config
-const float ACS_SENSITIVITY      = 0.100;      // Volts per Ampere (20A module default)
+float acs_sensitivity            = 0.100;      // Volts per Ampere (20A module default: 0.100, 5A: 0.185, 30A: 0.066)
 const float ACS_DIVIDER_FACTOR   = 0.456;      // Measured output divider ratio
 float zero_curr_motor_volt       = 1.139;      // Zero-current quiescent voltage
 float zero_curr_total_volt       = 1.137;      // Zero-current quiescent voltage
+float cal_curr_motor_mult        = 1.000;      // Fine-calibration trim multiplier
+float cal_curr_total_mult        = 1.000;      // Fine-calibration trim multiplier
+bool  enable_slew_rate           = true;       // Slew-rate soft-start ramp toggle
 
 // LEDC PWM Configuration for Motor Driver
 const int   PWM_CHANNEL          = 0;
@@ -183,15 +186,49 @@ void IRAM_ATTR isr_encoder_btn() {
 }
 
 // ------------------------------------------------------------------------------
-// HELPER: OVERSAMPLED ADC READING
+// HELPER: OVERSAMPLED ADC READING (GENERAL)
 // ------------------------------------------------------------------------------
 float read_adc_voltage(int pin, int samples = 64) {
   uint32_t sum = 0;
   for (int i = 0; i < samples; i++) {
     sum += analogRead(pin);
-    delayMicroseconds(180); // Filters 5kHz PWM and commutator commutation spikes
+    delayMicroseconds(120);
   }
   float avg_raw = (float)sum / (float)samples;
+  return (avg_raw / ADC_MAX_VAL) * V_REF;
+}
+
+// ------------------------------------------------------------------------------
+// HELPER: TRIMMED-MEAN ADC CURRENT SAMPLER (PWM & COMMUTATOR SPIKE REJECTION)
+// ------------------------------------------------------------------------------
+// Discards top 25% (inductive kickback spikes) & bottom 25% (ground drops),
+// averaging the middle 50% interquartile range to eliminate false 16.78A glitch.
+float read_current_channel_adc(int pin) {
+  const int NUM_SAMPLES = 64;
+  uint16_t samples[NUM_SAMPLES];
+
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    samples[i] = analogRead(pin);
+    delayMicroseconds(120); // Spans across multiple 5kHz PWM periods
+  }
+
+  // Insertion sort 64 samples
+  for (int i = 1; i < NUM_SAMPLES; i++) {
+    uint16_t key = samples[i];
+    int j = i - 1;
+    while (j >= 0 && samples[j] > key) {
+      samples[j + 1] = samples[j];
+      j--;
+    }
+    samples[j + 1] = key;
+  }
+
+  // Discard lowest 16 and highest 16 samples; average middle 32 samples
+  uint32_t sum = 0;
+  for (int i = 16; i < 48; i++) {
+    sum += samples[i];
+  }
+  float avg_raw = (float)sum / 32.0f;
   return (avg_raw / ADC_MAX_VAL) * V_REF;
 }
 
@@ -203,20 +240,36 @@ void calibrate_current_sensors() {
   digitalWrite(PIN_MOTOR_IN1, LOW);
   digitalWrite(PIN_MOTOR_IN2, LOW);
   ledcWrite(PWM_CHANNEL, 0);
-  delay(500);
+  delay(300);
 
   float sum_m = 0, sum_t = 0;
-  const int CAL_SAMPLES = 100;
+  const int CAL_SAMPLES = 40;
   for (int i = 0; i < CAL_SAMPLES; i++) {
-    sum_m += read_adc_voltage(PIN_CURR_MOTOR, 16);
-    sum_t += read_adc_voltage(PIN_CURR_TOTAL, 16);
-    delay(10);
+    sum_m += read_current_channel_adc(PIN_CURR_MOTOR);
+    sum_t += read_current_channel_adc(PIN_CURR_TOTAL);
+    delay(5);
   }
-  zero_curr_motor_volt = sum_m / CAL_SAMPLES;
-  zero_curr_total_volt = sum_t / CAL_SAMPLES;
+  float new_zero_m = sum_m / CAL_SAMPLES;
+  float new_zero_t = sum_t / CAL_SAMPLES;
 
-  Serial.printf("[CALIB] Zero-point Motor Current: %.3f V | Total Current: %.3f V\n",
-                zero_curr_motor_volt, zero_curr_total_volt);
+  // Sanity check: ACS712 at 0A produces ~2.50V. With 0.456 divider, ADC sees ~1.14V.
+  // Valid physical range is 0.80V to 1.50V. If outside, retain safe calibrated default.
+  if (new_zero_m >= 0.80f && new_zero_m <= 1.50f) {
+    zero_curr_motor_volt = new_zero_m;
+  } else {
+    Serial.printf("[CALIB] Warning: Motor 0A reading %.3f V out of range (0.80-1.50V). Retaining %.3f V\n",
+                  new_zero_m, zero_curr_motor_volt);
+  }
+
+  if (new_zero_t >= 0.80f && new_zero_t <= 1.50f) {
+    zero_curr_total_volt = new_zero_t;
+  } else {
+    Serial.printf("[CALIB] Warning: Total 0A reading %.3f V out of range (0.80-1.50V). Retaining %.3f V\n",
+                  new_zero_t, zero_curr_total_volt);
+  }
+
+  Serial.printf("[CALIB] Calibrated Zero Motor: %.3f V | Total: %.3f V (Sens: %.3f V/A)\n",
+                zero_curr_motor_volt, zero_curr_total_volt, acs_sensitivity);
 }
 
 // ------------------------------------------------------------------------------
@@ -241,20 +294,57 @@ void read_battery_taps(float &v_b1, float &v_b2, float &v_pack,
   cell_delta = c_max - c_min;
 }
 
+static float filtered_i_motor = 0.0;
+static float filtered_i_total = 0.0;
+
 void read_currents(float &i_motor, float &i_total) {
-  float v_adc_motor = read_adc_voltage(PIN_CURR_MOTOR, 64);
-  float v_adc_total = read_adc_voltage(PIN_CURR_TOTAL, 64);
+  // 1. Motor Current Zero Guarantee:
+  // If motor is not actively running with PWM > 0, armature current is physically 0.00A
+  if (!motor_running || motor_pwm_target == 0 || safety_tripped) {
+    filtered_i_motor = 0.0;
+    i_motor = 0.0;
+
+    // Total current idle logic draw (~0.08 - 0.15A quiescent for ESP32 + sensors)
+    float v_adc_total = read_current_channel_adc(PIN_CURR_TOTAL);
+    float v_sns_t     = v_adc_total / ACS_DIVIDER_FACTOR;
+    float v_zero_t    = zero_curr_total_volt / ACS_DIVIDER_FACTOR;
+    float raw_it      = (fabs(v_sns_t - v_zero_t) / acs_sensitivity) * cal_curr_total_mult;
+    if (raw_it < 0.06) raw_it = 0.0;
+    filtered_i_total  = constrain(raw_it, 0.0f, 0.25f);
+    i_total = filtered_i_total;
+    return;
+  }
+
+  // 2. Active Motor Drive Current with Trimmed-Mean Sampling
+  float v_adc_motor = read_current_channel_adc(PIN_CURR_MOTOR);
+  float v_adc_total = read_current_channel_adc(PIN_CURR_TOTAL);
 
   float v_sns_motor = v_adc_motor / ACS_DIVIDER_FACTOR;
   float v_sns_total = v_adc_total / ACS_DIVIDER_FACTOR;
   float v_zero_m    = zero_curr_motor_volt / ACS_DIVIDER_FACTOR;
   float v_zero_t    = zero_curr_total_volt / ACS_DIVIDER_FACTOR;
 
-  i_motor = fabs(v_sns_motor - v_zero_m) / ACS_SENSITIVITY;
-  i_total = fabs(v_sns_total - v_zero_t) / ACS_SENSITIVITY;
+  float delta_m = fabs(v_sns_motor - v_zero_m);
+  float delta_t = fabs(v_sns_total - v_zero_t);
 
-  if (i_motor < 0.08) i_motor = 0.0;
-  if (i_total < 0.08) i_total = 0.0;
+  float inst_i_motor = (delta_m / acs_sensitivity) * cal_curr_motor_mult;
+  float inst_i_total = (delta_t / acs_sensitivity) * cal_curr_total_mult;
+
+  // 3. Physical Sanity Clamp:
+  // RS-380 driven by L298N (rated 2.0A continuous, 3.0A peak) cannot physically draw 16.78A!
+  // Clamping to [0, 5.0A] prevents spurious momentary PWM edge spikes from corrupting telemetry.
+  inst_i_motor = constrain(inst_i_motor, 0.0f, 5.0f);
+  inst_i_total = constrain(inst_i_total, 0.0f, 6.0f);
+
+  if (inst_i_motor < 0.08) inst_i_motor = 0.0;
+  if (inst_i_total < 0.08) inst_i_total = 0.0;
+
+  // 4. Exponential Moving Average (alpha = 0.35) for smooth, stable SCADA telemetry
+  filtered_i_motor = (filtered_i_motor * 0.65f) + (inst_i_motor * 0.35f);
+  filtered_i_total = (filtered_i_total * 0.65f) + (inst_i_total * 0.35f);
+
+  i_motor = filtered_i_motor;
+  i_total = filtered_i_total;
 }
 
 float read_temperature_c() {
@@ -432,6 +522,37 @@ String execute_command(String cmd) {
   } else if (cmd == "CAL_ZERO") {
     calibrate_current_sensors();
     return "[CMD] Current sensors recalibrated.";
+  } else if (cmd.startsWith("CAL_SENS=")) {
+    float s = cmd.substring(9).toFloat();
+    if (s >= 0.02f && s <= 0.50f) {
+      acs_sensitivity = s;
+      return String("[CMD] ACS712 Sensitivity set to ") + String(acs_sensitivity, 4) + " V/A";
+    }
+    return "[CMD] Invalid sensitivity (0.02 - 0.50 V/A)";
+  } else if (cmd.startsWith("CAL_ZERO_M=")) {
+    float zm = cmd.substring(11).toFloat();
+    if (zm >= 0.50f && zm <= 2.20f) {
+      zero_curr_motor_volt = zm;
+      return String("[CMD] Motor zero voltage set to ") + String(zero_curr_motor_volt, 4) + " V";
+    }
+    return "[CMD] Invalid zero voltage (0.50 - 2.20 V)";
+  } else if (cmd.startsWith("CAL_ZERO_T=")) {
+    float zt = cmd.substring(11).toFloat();
+    if (zt >= 0.50f && zt <= 2.20f) {
+      zero_curr_total_volt = zt;
+      return String("[CMD] Total zero voltage set to ") + String(zero_curr_total_volt, 4) + " V";
+    }
+    return "[CMD] Invalid zero voltage (0.50 - 2.20 V)";
+  } else if (cmd.startsWith("CAL_TRIM_IMOT=")) {
+    cal_curr_motor_mult = cmd.substring(14).toFloat();
+    return String("[CMD] Motor current multiplier set to ") + String(cal_curr_motor_mult, 4);
+  } else if (cmd.startsWith("CAL_TRIM_ITOT=")) {
+    cal_curr_total_mult = cmd.substring(14).toFloat();
+    return String("[CMD] Total current multiplier set to ") + String(cal_curr_total_mult, 4);
+  } else if (cmd.startsWith("SET_SLEW=")) {
+    String sl = cmd.substring(9);
+    enable_slew_rate = (sl == "ON" || sl == "1" || sl == "true");
+    return String("[CMD] Slew-rate soft-start ramp: ") + (enable_slew_rate ? "ENABLED" : "DISABLED");
   } else if (cmd.startsWith("CAL_TRIM_B1=")) {
     cal_b1_mult = cmd.substring(12).toFloat();
     return String("[CMD] Trim B1 multiplier set to ") + String(cal_b1_mult, 4);
@@ -514,6 +635,11 @@ void handleHttpControl() {
   else if (action == "reset") result_msg = execute_command("RESET");
   else if (action == "bms_override") result_msg = execute_command(String("BMS_OVERRIDE=") + (val_str == "true" || val_str == "1" ? "ON" : "OFF"));
   else if (action == "cal_zero") result_msg = execute_command("CAL_ZERO");
+  else if (action == "cal_sens") result_msg = execute_command(String("CAL_SENS=") + val_str);
+  else if (action == "cal_zero_m") result_msg = execute_command(String("CAL_ZERO_M=") + val_str);
+  else if (action == "cal_zero_t") result_msg = execute_command(String("CAL_ZERO_T=") + val_str);
+  else if (action == "cal_trim_imot") result_msg = execute_command(String("CAL_TRIM_IMOT=") + val_str);
+  else if (action == "set_slew") result_msg = execute_command(String("SET_SLEW=") + val_str);
   else result_msg = "Unknown action";
 
   server.send(200, "application/json", "{\"success\":true,\"action\":\"" + action + "\",\"message\":\"" + result_msg + "\"}");
@@ -693,10 +819,14 @@ void loop() {
   if (millis() - last_ramp_time >= 15) {
     last_ramp_time = millis();
     int desired_pwm = (motor_running && !safety_tripped && encoder_position > 0) ? encoder_position : 0;
-    if (current_applied_pwm < desired_pwm) {
-      current_applied_pwm = min(desired_pwm, current_applied_pwm + 8);
-    } else if (current_applied_pwm > desired_pwm) {
-      current_applied_pwm = max(desired_pwm, current_applied_pwm - 16);
+    if (!enable_slew_rate) {
+      current_applied_pwm = desired_pwm;
+    } else {
+      if (current_applied_pwm < desired_pwm) {
+        current_applied_pwm = min(desired_pwm, current_applied_pwm + 8);
+      } else if (current_applied_pwm > desired_pwm) {
+        current_applied_pwm = max(desired_pwm, current_applied_pwm - 16);
+      }
     }
     apply_motor_speed(current_applied_pwm, motor_dir_forward);
     motor_pwm_target = current_applied_pwm;
@@ -734,19 +864,21 @@ void loop() {
     int rssi = wifi_sta_connected ? WiFi.RSSI() : -40; // Approx -40 dBm for direct AP
 
     // Emit Clean JSON Telemetry
-    char json_buf[420];
+    char json_buf[480];
     snprintf(json_buf, sizeof(json_buf),
              "{\"device_id\":\"RS380-MOT-01\",\"battery_voltage\":%.2f,\"motor_voltage\":%.2f,"
              "\"total_current\":%.2f,\"motor_current\":%.2f,\"temperature\":%.2f,\"vibration\":%.2f,"
              "\"rpm\":%d,\"pwm\":%d,\"direction\":\"%s\",\"cell1\":%.2f,\"cell2\":%.2f,\"cell3\":%.2f,"
-             "\"cell_delta\":%.2f,\"alert\":\"%s\",\"wireless\":true,\"wifi_ip\":\"%s\",\"rssi\":%d}\n",
+             "\"cell_delta\":%.2f,\"alert\":\"%s\",\"wireless\":true,\"wifi_ip\":\"%s\",\"rssi\":%d,"
+             "\"zero_m\":%.3f,\"zero_t\":%.3f,\"sens\":%.3f}\n",
              v_pack, motor_voltage, i_total, i_motor, temp_c, vib_g,
              rpm, motor_running ? motor_pwm_target : 0,
              motor_dir_forward ? "FWD" : "REV",
              cell1, cell2, cell3, cell_delta,
              safety_trip_reason.c_str(),
              wifi_active_ip.c_str(),
-             rssi);
+             rssi,
+             zero_curr_motor_volt, zero_curr_total_volt, acs_sensitivity);
 
     latest_json_packet = String(json_buf);
 

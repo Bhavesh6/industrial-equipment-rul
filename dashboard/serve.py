@@ -512,10 +512,47 @@ class SCADAHandler(SimpleHTTPRequestHandler):
                 cmd_to_send = f"BMS_OVERRIDE={state}"
             elif action == "cal_zero":
                 cmd_to_send = "CAL_ZERO"
+            elif action == "cal_sens":
+                try:
+                    sens = float(value)
+                    cmd_to_send = f"CAL_SENS={sens:.4f}"
+                except Exception:
+                    self._send_json(400, {"success": False, "message": "Invalid sensitivity value"})
+                    return
+            elif action == "cal_zero_m":
+                try:
+                    zm = float(value)
+                    cmd_to_send = f"CAL_ZERO_M={zm:.4f}"
+                except Exception:
+                    self._send_json(400, {"success": False, "message": "Invalid zero motor voltage"})
+                    return
+            elif action == "cal_zero_t":
+                try:
+                    zt = float(value)
+                    cmd_to_send = f"CAL_ZERO_T={zt:.4f}"
+                except Exception:
+                    self._send_json(400, {"success": False, "message": "Invalid zero total voltage"})
+                    return
+            elif action == "cal_trim_imot":
+                try:
+                    m = float(value)
+                    cmd_to_send = f"CAL_TRIM_IMOT={m:.4f}"
+                except Exception:
+                    self._send_json(400, {"success": False, "message": "Invalid multiplier value"})
+                    return
+            elif action == "set_slew":
+                state = "ON" if str(value).lower() in ["true", "1", "on"] else "OFF"
+                cmd_to_send = f"SET_SLEW={state}"
             elif action == "cal_trim":
                 ch = str(data.get("channel", "bpack")).upper()
                 mult = float(data.get("value", 1.0))
                 cmd_to_send = f"CAL_TRIM_{ch}={mult:.4f}"
+            elif action in ["raw_cmd", "custom_cmd"]:
+                raw_c = str(data.get("cmd") or value or "").strip()
+                if not raw_c:
+                    self._send_json(400, {"success": False, "message": "Empty command string"})
+                    return
+                cmd_to_send = raw_c
             else:
                 self._send_json(400, {"success": False, "message": f"Unknown action '{action}'"})
                 return
