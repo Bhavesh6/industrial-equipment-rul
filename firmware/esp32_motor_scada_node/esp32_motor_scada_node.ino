@@ -145,11 +145,11 @@ void IRAM_ATTR isr_encoder_btn() {
 // ------------------------------------------------------------------------------
 // HELPER: OVERSAMPLED ADC READING
 // ------------------------------------------------------------------------------
-float read_adc_voltage(int pin, int samples = 32) {
+float read_adc_voltage(int pin, int samples = 64) {
   uint32_t sum = 0;
   for (int i = 0; i < samples; i++) {
     sum += analogRead(pin);
-    delayMicroseconds(50);
+    delayMicroseconds(180); // Filters 5kHz PWM and commutator commutation spikes
   }
   float avg_raw = (float)sum / (float)samples;
   return (avg_raw / ADC_MAX_VAL) * V_REF;
@@ -306,20 +306,15 @@ void check_safety_limits(float i_motor, float temp_c, float vib_g) {
     oc_start_time = 0;
   }
 
-  // 2. Vibration breach with 400ms duration persistence
-  static unsigned long vib_start_time = 0;
-  if (vib_g > MAX_VIBRATION_G) {
-    if (vib_start_time == 0) vib_start_time = millis();
-    else if (millis() - vib_start_time > 400) {
-      safety_tripped = true;
-      safety_trip_reason = "VIBRATION_LIMIT_BREACH";
-    }
-  } else {
-    vib_start_time = 0;
+  // 2. Vibration warning (reported in telemetry for ML prognostics, but does not kill motor in demo)
+  if (vib_g > 2.50 && !safety_tripped) {
+    safety_trip_reason = "VIBRATION_HIGH";
+  } else if (!safety_tripped) {
+    safety_trip_reason = "NONE";
   }
 
-  // 3. Overtemperature trip (immediate)
-  if (temp_c > MAX_MOTOR_TEMP_C) {
+  // 3. Overtemperature trip (>80°C)
+  if (temp_c > 80.0) {
     safety_tripped = true;
     safety_trip_reason = "OVERTEMP_TRIP";
   }
