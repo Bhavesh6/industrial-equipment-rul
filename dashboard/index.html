@@ -356,11 +356,24 @@
           <div class="topbar-sub" id="topbarSub">Real-time telemetry, health index, and remaining useful life</div>
         </div>
       </div>
-      <div id="topbarSlot" style="display:flex;align-items:center;gap:10px">
+      <div id="topbarSlot" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <!-- Topbar Live Battery Pill -->
+        <div id="topbarBatteryPill" style="display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--surface);font-size:.72rem;font-weight:600;color:var(--muted)">
+          <i data-lucide="battery-charging" id="topbarBatteryIcon" style="width:14px;height:14px;color:var(--ok)"></i>
+          <span>3S: <strong class="mono" id="topbarBatVolt" style="color:var(--ink)">-- V</strong></span>
+          <span class="badge badge-ok" id="topbarBatSoc" style="font-size:.65rem;padding:2px 6px">--%</span>
+        </div>
+
+        <!-- Wireless Wi-Fi Quick Access Pill -->
+        <button type="button" class="btn btn-outline btn-sm" id="topbarWifiBtn" onclick="toggleWifiModal()" style="display:flex;align-items:center;gap:6px;font-size:.72rem;padding:4px 10px;border-radius:999px" title="Wi-Fi Wireless Telemetry Status & Configuration">
+          <i data-lucide="wifi" id="topbarWifiIcon" style="width:14px;height:14px;color:var(--ok)"></i>
+          <span id="topbarWifiLabel">192.168.4.1</span>
+        </button>
+
         <span class="live-pill is-live" id="globalLivePill">
-          <span class="live-dot"></span>Live · <span id="liveHz">2</span> Hz
+          <span class="live-dot"></span>Live · <span id="liveHz">5</span> Hz
         </span>
-        <button class="btn btn-outline btn-sm" onclick="exportCSV()">
+        <button class="btn btn-outline btn-sm" onclick="downloadTelemetryCsv()">
           <i data-lucide="file-spreadsheet" aria-hidden="true"></i><span class="btn-label">Export</span>
         </button>
       </div>
@@ -368,6 +381,37 @@
 
     <!-- Content -->
     <div class="content">
+
+      <!-- Virtual Software BMS & Charger Safety Alerts (Protects Unprotected 3S Pack Without Physical BMS) -->
+      <div id="bmsChargeAlarmBanner" style="display:none;margin-bottom:16px;padding:12px 16px;border-radius:var(--radius);background:#fef2f2;border:2px solid #ef4444;color:#991b1b;box-shadow:0 4px 14px rgba(239,68,68,0.2)">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <i data-lucide="alert-triangle" style="width:24px;height:24px;color:#dc2626;flex-shrink:0"></i>
+            <div>
+              <strong style="font-size:.85rem;color:#b91c1c;text-transform:uppercase;letter-spacing:.05em">⚠️ CRITICAL: UNPLUG CHARGER NOW — OVERCHARGE DANGER!</strong>
+              <div style="font-size:.78rem;color:#7f1d1d;margin-top:2px" id="bmsChargeAlarmText">
+                No physical BMS is installed on this 3S pack! Cell voltage has reached safe charging cutoff (> 4.15V). Unplug the charger immediately to prevent irreversible battery degradation or fire hazard.
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm" onclick="dismissChargeAlarm()" style="background:#dc2626;border-color:#b91c1c;color:#fff;font-size:.72rem;font-weight:700">ACKNOWLEDGE</button>
+        </div>
+      </div>
+
+      <div id="bmsUndervoltAlarmBanner" style="display:none;margin-bottom:16px;padding:12px 16px;border-radius:var(--radius);background:#fffbeb;border:1px solid #f59e0b;color:#92400e;box-shadow:0 2px 8px rgba(245,158,11,0.15)">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <i data-lucide="shield-alert" style="width:20px;height:20px;color:#d97706;flex-shrink:0"></i>
+            <div>
+              <strong style="font-size:.85rem;color:#b45309;text-transform:uppercase;letter-spacing:.05em">⚡ VIRTUAL BMS UNDER-VOLTAGE CUTOFF ACTIVATED</strong>
+              <div style="font-size:.78rem;color:#78350f;margin-top:2px" id="bmsUndervoltAlarmText">
+                Cell voltage dropped below 2.80V cutoff. Motor power safely tripped to protect unprotected 18650 cells. Recharge battery pack.
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-outline btn-sm" onclick="sendMotorCmd('reset')" style="font-size:.72rem">Clear Trip</button>
+        </div>
+      </div>
 
       <!-- ════════════ SECTION: OVERVIEW ════════════ -->
       <section class="page-section is-active" id="sec-overview">
@@ -464,6 +508,24 @@
                 <button type="button" class="btn" id="btnMotorEstop" onclick="sendMotorCmd('estop')" style="background:#dc2626;border:1px solid #b91c1c;color:#fff;font-weight:800;letter-spacing:.08em;padding:10px 16px;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 2px 8px rgba(220,38,38,0.35);cursor:pointer;border-radius:var(--radius)">
                   <i data-lucide="octagon-alert" style="width:18px;height:18px"></i> EMERGENCY STOP (E-STOP)
                 </button>
+
+                <!-- Diagnostic & Safety Tools Row -->
+                <div style="display:grid;grid-template-columns: 1fr 1fr;gap:8px;margin-top:4px">
+                  <button type="button" class="btn btn-outline" id="btnSpeedSweep" onclick="runSpeedSweep()" style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:.76rem" title="Automated characterization sweep through [150, 170, 190, 210, 230, 0]">
+                    <i data-lucide="activity" style="width:14px;height:14px"></i> <span id="sweepBtnText">Speed Sweep</span>
+                  </button>
+                  <button type="button" class="btn btn-outline" id="btnCalZero" onclick="recalibrateZero()" style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:.76rem" title="Zero-calibrate current sensors while motor idle">
+                    <i data-lucide="target" style="width:14px;height:14px"></i> Zero Current
+                  </button>
+                </div>
+                <div style="display:grid;grid-template-columns: 1fr 1fr;gap:8px">
+                  <button type="button" class="btn btn-outline" id="btnBmsCutoffToggle" onclick="toggleBmsOverride()" style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:.74rem" title="Virtual BMS Under-Voltage Cutoff Protection (2.80V min/cell)">
+                    <i data-lucide="shield" style="width:14px;height:14px;color:var(--ok)" id="bmsCutoffIcon"></i> <span id="bmsCutoffLabel">BMS: SAFE</span>
+                  </button>
+                  <button type="button" class="btn btn-outline" id="btnExportCsvDirect" onclick="downloadTelemetryCsv()" style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:.74rem" title="Download High-Resolution CSV Telemetry Dataset">
+                    <i data-lucide="download" style="width:14px;height:14px"></i> Export CSV
+                  </button>
+                </div>
               </div>
 
               <!-- Right Column: Interactive PWM Speed Modulation & Presets -->
@@ -2203,22 +2265,175 @@ function renderMotorControlUI() {
   }
 }
 
-function updateHardwareStatus(connected, port = 'COM5') {
+function updateHardwareStatus(connected, port = 'COM5', transport = 'USB_SERIAL', wifiIp = '192.168.4.1', rssi = -40) {
   motorControlState.connected = connected;
   const hwBadge = document.getElementById('ctrlHwBadge');
   const hwStatus = document.getElementById('ctrlHwStatus');
+  const wifiLabel = document.getElementById('topbarWifiLabel');
+
+  if (wifiLabel) wifiLabel.textContent = wifiIp || '192.168.4.1';
+
   if (hwBadge && hwStatus) {
     if (connected) {
-      hwBadge.style.background = 'var(--ok-soft)';
-      hwBadge.style.color = 'var(--ok)';
-      hwBadge.style.borderColor = '#c3ddcd';
-      hwStatus.textContent = (port || 'COM5') + ' LIVE';
+      if (transport === 'WIRELESS_WIFI') {
+        hwBadge.style.background = 'var(--ok-soft)';
+        hwBadge.style.color = 'var(--ok)';
+        hwBadge.style.borderColor = '#c3ddcd';
+        hwStatus.textContent = 'WIRELESS LIVE (' + (wifiIp || '192.168.4.1') + ')';
+      } else {
+        hwBadge.style.background = 'var(--ok-soft)';
+        hwBadge.style.color = 'var(--ok)';
+        hwBadge.style.borderColor = '#c3ddcd';
+        hwStatus.textContent = (port || 'COM5') + ' LIVE';
+      }
     } else {
       hwBadge.style.background = 'var(--surface-alt)';
       hwBadge.style.color = 'var(--muted)';
       hwBadge.style.borderColor = 'var(--border)';
       hwStatus.textContent = 'SIMULATED (COM5 OFFLINE)';
     }
+  }
+}
+
+// ─────────── VIRTUAL BMS & CHARGING WATCHDOG ───────────
+let chargeAlarmDismissedUntil = 0;
+
+function updateVirtualBmsWatchdog(hw) {
+  if (!hw) return;
+  const c1 = +(hw.cell1 || 0);
+  const c2 = +(hw.cell2 || 0);
+  const c3 = +(hw.cell3 || 0);
+  const vPack = +(hw.battery_voltage || (c1 + c2 + c3));
+  const maxCell = Math.max(c1, c2, c3);
+  const minCell = Math.min(c1, c2, c3);
+
+  // 1. Topbar Battery Pill
+  const topBatVolt = document.getElementById('topbarBatVolt');
+  if (topBatVolt) topBatVolt.textContent = vPack.toFixed(2) + ' V';
+  const topBatSoc = document.getElementById('topbarBatSoc');
+  if (topBatSoc) {
+    const soc = Math.min(100, Math.max(0, Math.round(((vPack - 9.0) / 3.6) * 100)));
+    topBatSoc.textContent = soc + '%';
+    topBatSoc.className = 'badge ' + (soc > 40 ? 'badge-ok' : (soc > 20 ? 'badge-warning' : 'badge-danger'));
+  }
+
+  // 2. Overcharge Watchdog (Protects raw 3S 18650 cells without physical BMS)
+  const chargeBanner = document.getElementById('bmsChargeAlarmBanner');
+  const chargeText = document.getElementById('bmsChargeAlarmText');
+  const now = Date.now();
+  if (maxCell >= 4.15 && now > chargeAlarmDismissedUntil) {
+    if (chargeBanner) {
+      chargeBanner.style.display = 'block';
+      let cellName = c1 === maxCell ? 'Cell 1' : (c2 === maxCell ? 'Cell 2' : 'Cell 3');
+      if (chargeText) {
+        chargeText.textContent = `${cellName} has reached ${maxCell.toFixed(2)} V! Pack total is ${vPack.toFixed(2)} V. Without a physical hardware BMS, continued charging risks thermal runaway. UNPLUG CHARGER NOW!`;
+      }
+    }
+  } else if (chargeBanner && maxCell < 4.12) {
+    chargeBanner.style.display = 'none';
+  }
+
+  // 3. Under-voltage Cutoff Watchdog
+  const undervoltBanner = document.getElementById('bmsUndervoltAlarmBanner');
+  const undervoltText = document.getElementById('bmsUndervoltAlarmText');
+  const isBmsTrip = (hw.alert === 'BMS_UNDERVOLT_TRIP') || (minCell > 0.5 && minCell < 2.80);
+  if (isBmsTrip) {
+    if (undervoltBanner) {
+      undervoltBanner.style.display = 'block';
+      if (undervoltText) {
+        undervoltText.textContent = `Lowest cell reached ${minCell.toFixed(2)} V (< 2.80V cutoff). Virtual BMS has automatically cut motor power to protect unprotected 18650 cells. Recharge 3S pack.`;
+      }
+    }
+  } else if (undervoltBanner && minCell >= 2.90) {
+    undervoltBanner.style.display = 'none';
+  }
+}
+
+function dismissChargeAlarm() {
+  chargeAlarmDismissedUntil = Date.now() + 120000; // 2 min snooze
+  const b = document.getElementById('bmsChargeAlarmBanner');
+  if (b) b.style.display = 'none';
+}
+
+// ─────────── ADVANCED ACTUATION & DIAGNOSTIC HANDLERS ───────────
+let isSweeping = false;
+let isBmsOverridden = false;
+
+async function runSpeedSweep() {
+  const btn = document.getElementById('btnSpeedSweep');
+  const text = document.getElementById('sweepBtnText');
+  if (isSweeping) return;
+  isSweeping = true;
+  if (text) text.textContent = 'Sweeping...';
+  if (btn) btn.classList.add('is-active');
+
+  try {
+    const res = await fetch('/api/motor/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'sweep' })
+    });
+    const data = await res.json();
+    console.log('[SWEEP]', data);
+  } catch (e) {
+    console.error('Sweep failed:', e);
+  } finally {
+    setTimeout(() => {
+      isSweeping = false;
+      if (text) text.textContent = 'Speed Sweep';
+      if (btn) btn.classList.remove('is-active');
+    }, 16000);
+  }
+}
+
+async function recalibrateZero() {
+  const btn = document.getElementById('btnCalZero');
+  if (btn) btn.classList.add('is-active');
+  await sendMotorCmd('cal_zero');
+  setTimeout(() => {
+    if (btn) btn.classList.remove('is-active');
+  }, 1000);
+}
+
+async function toggleBmsOverride() {
+  isBmsOverridden = !isBmsOverridden;
+  const label = document.getElementById('bmsCutoffLabel');
+  const icon = document.getElementById('bmsCutoffIcon');
+  if (label) label.textContent = isBmsOverridden ? 'BMS: OVERRIDE' : 'BMS: SAFE';
+  if (icon) icon.style.color = isBmsOverridden ? 'var(--hazard)' : 'var(--ok)';
+  await sendMotorCmd('bms_override', isBmsOverridden);
+}
+
+function downloadTelemetryCsv() {
+  window.open('/api/telemetry/export.csv', '_blank');
+}
+
+function toggleWifiModal() {
+  const m = document.getElementById('wifiConfigModal');
+  if (!m) return;
+  m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
+  if (window.lucide) window.lucide.createIcons();
+}
+
+async function saveWifiConfig(e) {
+  e.preventDefault();
+  const ssid = document.getElementById('cfgWifiSsid').value.trim();
+  const password = document.getElementById('cfgWifiPass').value;
+  const btn = document.getElementById('btnSaveWifi');
+  if (btn) btn.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/wifi/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ssid, password })
+    });
+    const data = await res.json();
+    alert(data.message || 'Wi-Fi credentials saved to ESP32!');
+    toggleWifiModal();
+  } catch (err) {
+    alert('Failed to save Wi-Fi config: ' + err);
+  } finally {
+    if (btn) btn.textContent = 'Save & Connect';
   }
 }
 
@@ -2349,9 +2564,13 @@ async function tick() {
         const hw = json.data.telemetry;
         const pred = json.data.prediction;
         const isConnected = !!json.data.connected;
+        const transport = json.data.transport || (hw.wireless ? 'WIRELESS_WIFI' : 'USB_SERIAL');
+        const wifiIp = json.data.wireless_ip || hw.wifi_ip || '192.168.4.1';
+        const rssi = hw.rssi !== undefined ? hw.rssi : -40;
 
-        updateHardwareStatus(isConnected, json.data.port);
+        updateHardwareStatus(isConnected, json.data.port, transport, wifiIp, rssi);
         updateControlPanelFromHw(hw);
+        updateVirtualBmsWatchdog(hw);
 
         const r = transformHardwareTelemetry(hw, pred);
         lastTelemetryReading = r;
@@ -2517,5 +2736,47 @@ document.querySelectorAll('.nav-item').forEach(item => {
   });
 });
 </script>
+
+<!-- Wi-Fi Wireless Configuration Modal -->
+<div id="wifiConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;backdrop-filter:blur(3px);align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);max-width:480px;width:100%;box-shadow:var(--shadow-lift);padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <h3 style="margin:0;font-size:1.1rem;display:flex;align-items:center;gap:8px">
+        <i data-lucide="wifi" style="width:18px;height:18px;color:var(--accent)"></i> Wireless SCADA Connection
+      </h3>
+      <button type="button" class="btn btn-outline btn-sm" onclick="toggleWifiModal()">&times;</button>
+    </div>
+    
+    <div style="background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:16px;font-size:.78rem">
+      <div style="font-weight:700;color:var(--ink);margin-bottom:6px">ESP32 Built-in Standalone Access Point</div>
+      <div style="color:var(--muted);line-height:1.6">
+        &bull; Wi-Fi Hotspot SSID: <strong>RS380-SCADA-WIFI</strong><br>
+        &bull; Password: <strong>scadapassword</strong><br>
+        &bull; Direct Node IP: <a href="http://192.168.4.1" target="_blank" style="color:var(--accent);font-weight:600">http://192.168.4.1</a><br>
+        &bull; mDNS Address: <a href="http://rs380-node.local" target="_blank" style="color:var(--accent);font-weight:600">http://rs380-node.local</a><br>
+        &bull; High-Frequency Telemetry: <strong>UDP Port 8888 (5 Hz)</strong>
+      </div>
+    </div>
+
+    <form onsubmit="saveWifiConfig(event)" style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:.82rem;font-weight:600;color:var(--ink)">Connect Node to Local / Mobile Wi-Fi (Station Mode)</div>
+      <div>
+        <label style="display:block;font-size:.74rem;color:var(--muted);margin-bottom:4px">Local Wi-Fi SSID</label>
+        <input type="text" id="cfgWifiSsid" placeholder="e.g. HomeRouter or PhoneHotspot" required
+               style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--ink);font-size:.85rem">
+      </div>
+      <div>
+        <label style="display:block;font-size:.74rem;color:var(--muted);margin-bottom:4px">Wi-Fi Password</label>
+        <input type="password" id="cfgWifiPass" placeholder="Enter password (leave blank if open)"
+               style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--ink);font-size:.85rem">
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px">
+        <button type="button" class="btn btn-outline" onclick="toggleWifiModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="btnSaveWifi">Save &amp; Connect</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 </body>
 </html>

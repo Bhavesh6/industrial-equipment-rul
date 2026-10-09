@@ -22,6 +22,11 @@ import os
 import json
 import time
 import threading
+import collections
+import csv
+import io
+import socket
+import urllib.request
 from pathlib import Path
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -84,16 +89,17 @@ def find_esp32_port(preferred="COM5"):
 
 class HardwareSerialBridge:
     """Background worker that continuously ingests ESP32 telemetry from COM5
-
-    and provides thread-safe bi-directional motor control commands.
+    or wireless Wi-Fi UDP (port 8888) and provides bi-directional motor control commands.
     """
 
-    def __init__(self, port="COM5", baudrate=115200):
+    def __init__(self, port="COM5", baudrate=115200, udp_port=8888):
         self.preferred_port = port
         self.active_port = None
         self.baudrate = baudrate
+        self.udp_port = udp_port
         self.ser = None
         self.connected = False
+        self.transport = "DISCONNECTED"
         self.running = True
         self.lock = threading.Lock()
         self.latest_telemetry = None
@@ -101,17 +107,105 @@ class HardwareSerialBridge:
         self.last_packet_time = 0
         self.packets_received = 0
         self.last_command_sent = None
+        self.telemetry_history = collections.deque(maxlen=2500)
+        self.is_sweeping = False
+        self.wireless_ip = None
+        self.last_wireless_packet_time = 0
+        self.wireless_packets_received = 0
 
     def start(self):
-        t = threading.Thread(target=self._worker_loop, daemon=True, name="HardwareSerialBridge")
+        t_ser = threading.Thread(target=self._worker_loop, daemon=True, name="SerialBridgeWorker")
+        t_ser.start()
+        t_udp = threading.Thread(target=self._udp_worker_loop, daemon=True, name="WirelessUdpWorker")
+        t_udp.start()
+        print(f"[BRIDGE] Started Dual-Transport Bridge: Serial ({self.preferred_port} @ {self.baudrate}) + Wireless UDP (port {self.udp_port})")
+
+    def start_sweep(self):
+        """Run an automated multi-step speed characterization sweep."""
+        if self.is_sweeping:
+            return False, "Characterization sweep already in progress"
+        t = threading.Thread(target=self._sweep_worker, daemon=True, name="SpeedSweepWorker")
         t.start()
-        print(f"[SERIAL] Hardware bridge worker thread started (target: {self.preferred_port} @ {self.baudrate} baud)")
+        return True, "Automated characterization sweep started"
+
+    def _sweep_worker(self):
+        self.is_sweeping = True
+        print("[SWEEP] Starting automated characterization sweep: [150, 170, 190, 210, 230, 0]")
+        steps = [150, 170, 190, 210, 230, 0]
+        try:
+            for pwm in steps:
+                if not self.running or not self.connected:
+                    break
+                print(f"[SWEEP] Setting PWM: {pwm} (holding 2.5s)...")
+                self.send_command(f"SPEED={pwm}")
+                time.sleep(2.5)
+        finally:
+            self.send_command("STOP")
+            self.is_sweeping = False
+            print("[SWEEP] Automated characterization sweep completed.")
+
+    def _udp_worker_loop(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(('', self.udp_port))
+            sock.settimeout(1.0)
+            print(f"[WIRELESS] Listening for wireless ESP32 telemetry on UDP port {self.udp_port}...")
+        except Exception as e:
+            print(f"[WIRELESS] Note: could not bind UDP port {self.udp_port}: {e}")
+            return
+
+        while self.running:
+            try:
+                raw_data, addr = sock.recvfrom(4096)
+                line = raw_data.decode("utf-8", errors="ignore").strip()
+                if not line:
+                    continue
+                if line.startswith("{") and line.endswith("}"):
+                    try:
+                        data = json.loads(line)
+                        now = time.time()
+                        pred = None
+                        if ml_predictor is not None:
+                            try:
+                                pred = ml_predictor.predict(data)
+                            except Exception as err:
+                                pred = {"error": str(err), "rul_hours": 0.0, "status": "ERROR"}
+
+                        with self.lock:
+                            self.wireless_ip = addr[0]
+                            self.last_wireless_packet_time = now
+                            self.wireless_packets_received += 1
+                            # If serial has not received a packet recently, wireless takes over
+                            if (now - self.last_packet_time > 1.2) or self.transport == "WIRELESS_WIFI":
+                                self.transport = "WIRELESS_WIFI"
+                                self.connected = True
+                                self.latest_telemetry = data
+                                self.latest_prediction = pred
+                                self.last_packet_time = now
+                                self.packets_received += 1
+                                self.telemetry_history.append({
+                                    "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    **data,
+                                    "transport": "WIRELESS",
+                                    "rul_hours": pred.get("rul_hours") if pred else None,
+                                    "health_index": pred.get("health_index") if pred else None,
+                                    "status": pred.get("status") if pred else None,
+                                })
+                    except Exception:
+                        pass
+            except socket.timeout:
+                continue
+            except Exception:
+                time.sleep(0.5)
 
     def _worker_loop(self):
         while self.running:
             target_port = find_esp32_port(self.preferred_port)
             if not target_port:
-                self.connected = False
+                if time.time() - self.last_wireless_packet_time > 3.0:
+                    self.connected = False
+                    self.transport = "DISCONNECTED"
                 time.sleep(2.0)
                 continue
 
@@ -126,6 +220,7 @@ class HardwareSerialBridge:
                 self.ser.reset_input_buffer()
                 self.active_port = target_port
                 self.connected = True
+                self.transport = "USB_SERIAL"
                 print(f"[SERIAL] Connected to ESP32 on {target_port} @ {self.baudrate} baud")
 
                 while self.running and self.ser and self.ser.is_open:
@@ -152,17 +247,26 @@ class HardwareSerialBridge:
                                     pred = {"error": str(err), "rul_hours": 0.0, "status": "ERROR"}
 
                             with self.lock:
+                                self.transport = "USB_SERIAL"
+                                self.connected = True
                                 self.latest_telemetry = data
                                 self.latest_prediction = pred
                                 self.last_packet_time = time.time()
                                 self.packets_received += 1
+                                self.telemetry_history.append({
+                                    "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    **data,
+                                    "transport": "USB_SERIAL",
+                                    "rul_hours": pred.get("rul_hours") if pred else None,
+                                    "health_index": pred.get("health_index") if pred else None,
+                                    "status": pred.get("status") if pred else None,
+                                })
                         except Exception:
                             pass
                     elif line.startswith("[") or "ALERT" in line or "CMD" in line:
                         print(f"  [ESP32] {line}")
 
             except Exception as e:
-                self.connected = False
                 self.active_port = None
                 if self.ser:
                     try:
@@ -170,6 +274,9 @@ class HardwareSerialBridge:
                     except Exception:
                         pass
                     self.ser = None
+                if time.time() - self.last_wireless_packet_time > 3.0:
+                    self.connected = False
+                    self.transport = "DISCONNECTED"
                 time.sleep(2.0)
 
     def send_command(self, cmd_str):
@@ -178,38 +285,66 @@ class HardwareSerialBridge:
         if not cmd_str:
             return False, "Empty command string"
 
-        with self.lock:
-            if not self.connected or not self.ser or not self.ser.is_open:
-                return False, f"Hardware serial port {self.active_port or self.preferred_port} is not connected"
+        success = False
+        msgs = []
 
+        # 1. Send via USB Serial if connected
+        with self.lock:
+            can_serial = self.ser and self.ser.is_open
+
+        if can_serial:
             try:
                 msg = (cmd_str + "\n").encode("utf-8")
                 self.ser.write(msg)
                 self.ser.flush()
-                self.last_command_sent = {"cmd": cmd_str, "time": time.time()}
-                print(f"[SERIAL] >>> Sent command to ESP32: '{cmd_str}'")
-                return True, f"Command '{cmd_str}' sent successfully"
+                success = True
+                msgs.append("USB Serial")
             except Exception as e:
-                print(f"[SERIAL] ❌ Error writing command '{cmd_str}': {e}")
-                return False, str(e)
+                msgs.append(f"Serial err: {e}")
+
+        # 2. Send via Wireless UDP to ESP32 IP
+        target_ip = self.wireless_ip or "192.168.4.1"
+        try:
+            udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udp_sock.settimeout(0.3)
+            udp_sock.sendto(cmd_str.encode("utf-8"), (target_ip, self.udp_port))
+            udp_sock.close()
+            success = True
+            msgs.append(f"Wireless UDP ({target_ip})")
+        except Exception as e:
+            msgs.append(f"UDP err: {e}")
+
+        with self.lock:
+            self.last_command_sent = {"cmd": cmd_str, "time": time.time(), "transport": self.transport}
+
+        print(f"[BRIDGE] >>> Sent command '{cmd_str}': {', '.join(msgs)}")
+        return success, f"Command '{cmd_str}' dispatched via {', '.join(msgs)}"
 
     def get_snapshot(self):
         """Retrieve the latest telemetry, ML prediction, and connection status."""
         now = time.time()
         with self.lock:
             is_stale = (now - self.last_packet_time) > 4.0 if self.last_packet_time > 0 else True
+            transport = self.transport
+            if is_stale:
+                transport = "DISCONNECTED"
             return {
-                "connected": self.connected and not is_stale,
+                "connected": not is_stale,
+                "transport": transport,
                 "port": self.active_port or self.preferred_port,
+                "wireless_ip": self.wireless_ip or "192.168.4.1",
                 "last_packet_age_s": round(now - self.last_packet_time, 2) if self.last_packet_time > 0 else None,
                 "packets_received": self.packets_received,
+                "wireless_packets_received": self.wireless_packets_received,
+                "is_sweeping": self.is_sweeping,
+                "history_count": len(self.telemetry_history),
                 "telemetry": self.latest_telemetry,
                 "prediction": self.latest_prediction,
                 "last_command": self.last_command_sent,
             }
 
 
-# Instantiate and start the hardware serial bridge
+# Instantiate and start the hardware dual-transport bridge
 hardware_bridge = HardwareSerialBridge(port="COM5", baudrate=115200)
 hardware_bridge.start()
 
@@ -246,14 +381,66 @@ class SCADAHandler(SimpleHTTPRequestHandler):
             self._send_json(200, {
                 "success": True,
                 "server": "online",
-                "serial_connected": snapshot["connected"],
+                "connected": snapshot["connected"],
+                "serial_connected": snapshot["connected"] and snapshot["transport"] == "USB_SERIAL",
+                "transport": snapshot["transport"],
                 "port": snapshot["port"],
+                "wireless_ip": snapshot["wireless_ip"],
                 "ml_ready": ml_predictor is not None and ml_predictor.is_ml_ready,
                 "packets_received": snapshot["packets_received"],
+                "wireless_packets_received": snapshot["wireless_packets_received"],
+                "is_sweeping": snapshot["is_sweeping"],
+                "history_count": snapshot["history_count"]
             })
             return
 
-        # 3. Model Info endpoint
+        # 3. Telemetry CSV Export endpoint
+        if clean_path in ["/api/telemetry/export.csv", "/api/telemetry/export"]:
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow([
+                "Timestamp", "Device_ID", "Battery_Voltage_V", "Motor_Voltage_V",
+                "Total_Current_A", "Motor_Current_A", "Temperature_C", "Vibration_g",
+                "RPM", "PWM", "Direction", "Cell1_V", "Cell2_V", "Cell3_V", "Cell_Delta_V",
+                "Hardware_Alert", "ML_RUL_Hours", "ML_Health_Index", "ML_Status"
+            ])
+            with hardware_bridge.lock:
+                history_copy = list(hardware_bridge.telemetry_history)
+
+            for row in history_copy:
+                writer.writerow([
+                    row.get("time", ""),
+                    row.get("device_id", "RS380-MOT-01"),
+                    row.get("battery_voltage", ""),
+                    row.get("motor_voltage", ""),
+                    row.get("total_current", ""),
+                    row.get("motor_current", ""),
+                    row.get("temperature", ""),
+                    row.get("vibration", ""),
+                    row.get("rpm", ""),
+                    row.get("pwm", ""),
+                    row.get("direction", ""),
+                    row.get("cell1", ""),
+                    row.get("cell2", ""),
+                    row.get("cell3", ""),
+                    row.get("cell_delta", ""),
+                    row.get("alert", ""),
+                    row.get("rul_hours", ""),
+                    row.get("health_index", ""),
+                    row.get("status", "")
+                ])
+
+            csv_data = output.getvalue().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", 'attachment; filename="rs380_scada_telemetry.csv"')
+            self.send_header("Content-Length", str(len(csv_data)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(csv_data)
+            return
+
+        # 4. Model Info endpoint
         if clean_path == "/api/model-info":
             metrics_path = Path(__file__).resolve().parent.parent / "models" / "metrics.json"
             if metrics_path.exists():
@@ -311,6 +498,24 @@ class SCADAHandler(SimpleHTTPRequestHandler):
                 cmd_to_send = "ESTOP"
             elif action in ["reset", "clear_trip"]:
                 cmd_to_send = "RESET"
+            elif action == "sweep":
+                ok, msg = hardware_bridge.start_sweep()
+                self._send_json(200 if ok else 400, {
+                    "success": ok,
+                    "action": "sweep",
+                    "message": msg,
+                    "connected": hardware_bridge.connected
+                })
+                return
+            elif action == "bms_override":
+                state = "ON" if str(value).lower() in ["true", "1", "on"] else "OFF"
+                cmd_to_send = f"BMS_OVERRIDE={state}"
+            elif action == "cal_zero":
+                cmd_to_send = "CAL_ZERO"
+            elif action == "cal_trim":
+                ch = str(data.get("channel", "bpack")).upper()
+                mult = float(data.get("value", 1.0))
+                cmd_to_send = f"CAL_TRIM_{ch}={mult:.4f}"
             else:
                 self._send_json(400, {"success": False, "message": f"Unknown action '{action}'"})
                 return
@@ -326,7 +531,30 @@ class SCADAHandler(SimpleHTTPRequestHandler):
             })
             return
 
-        # 2. Predict API endpoint
+        # 2. Wi-Fi Configuration endpoint
+        if clean_path == "/api/wifi/config":
+            try:
+                content_len = int(self.headers.get("Content-Length", 0))
+                raw_body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+                data = json.loads(raw_body)
+                ssid = data.get("ssid", "").strip()
+                password = data.get("password", "").strip()
+                if not ssid:
+                    self._send_json(400, {"success": False, "message": "SSID cannot be empty"})
+                    return
+                cmd = f"WIFI_SET={ssid},{password}"
+                ok, msg = hardware_bridge.send_command(cmd)
+                self._send_json(200 if ok else 500, {
+                    "success": ok,
+                    "message": f"Configured Wi-Fi credentials for '{ssid}'",
+                    "details": msg
+                })
+                return
+            except Exception as e:
+                self._send_json(500, {"success": False, "message": str(e)})
+                return
+
+        # 3. Predict API endpoint
         if clean_path == "/api/predict":
             try:
                 length = int(self.headers.get("Content-Length", 0))
