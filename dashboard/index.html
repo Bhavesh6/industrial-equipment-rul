@@ -3349,7 +3349,7 @@ async function tick() {
         updateAlerts(r);
         if (currentPage === 'prognostics') refreshPrognostics();
         tickCount++;
-        document.getElementById('liveHz').textContent = isConnected ? '5' : '2';
+        document.getElementById('liveHz').textContent = isConnected ? '10' : '2';
         isPollingTelemetry = false;
         return;
       }
@@ -3415,7 +3415,7 @@ window.getLiveTelemetry = function() {
   };
 };
 
-setInterval(tick, 300);
+setInterval(tick, 80);
 
 // Initial prognostics range group
 document.getElementById('progRangeGroup').addEventListener('click', e => {

@@ -137,25 +137,25 @@ volatile int  encoder_position   = 0;         // Starts safely at 0
 volatile bool encoder_btn_pressed = false;
 volatile unsigned long last_enc_pulse_time = 0;
 volatile unsigned long enc_pulse_interval  = 0;
-volatile unsigned long last_scada_cmd_time = 0; // Lockout physical knob when SCADA / automated test is active
+volatile unsigned long last_scada_cmd_time = 0; // Lockout physical knob only immediately after programmatic command
 
 // Timing intervals
 unsigned long last_telemetry_tx = 0;
-const unsigned long TELEMETRY_INTERVAL_MS = 200; // 5 Hz telemetry stream
+const unsigned long TELEMETRY_INTERVAL_MS = 100; // 10 Hz high-speed real-time telemetry stream
 
 // Forward declaration of command executor
 String execute_command(String cmd);
 
 // ------------------------------------------------------------------------------
-// INTERRUPT SERVICE ROUTINES (KY-040 ENCODER WITH HARDWARE DEBOUNCE & VIBRATION LOCKOUT)
+// INTERRUPT SERVICE ROUTINES (KY-040 ENCODER WITH ZERO-LAG RESPONSIVE DEBOUNCE)
 // ------------------------------------------------------------------------------
 void IRAM_ATTR isr_encoder_clk() {
   unsigned long now = millis();
-  // If recently commanded via SCADA/API, suppress vibration-induced encoder jitter
-  if (now - last_scada_cmd_time < 8000) return;
+  // Only lockout physical knob for 1.2s if an automated SCADA sweep command was just sent
+  if (now - last_scada_cmd_time < 1200) return;
 
   static unsigned long last_clk_time = 0;
-  if (now - last_clk_time > 35) { // 35ms robust physical rotation filter
+  if (now - last_clk_time > 10) { // 10ms crisp physical rotation filter (captures fast human turns)
     int clk = digitalRead(PIN_ENC_CLK);
     int dt  = digitalRead(PIN_ENC_DT);
     if (clk != dt) {
@@ -185,7 +185,7 @@ void IRAM_ATTR isr_encoder_clk() {
 void IRAM_ATTR isr_encoder_btn() {
   static unsigned long last_btn_press = 0;
   unsigned long now = millis();
-  if (now - last_btn_press > 450) { // 450ms lockout to eliminate contact bounce toggle
+  if (now - last_btn_press > 180) { // 180ms responsive human button filter
     encoder_btn_pressed = true;
     last_btn_press = now;
   }
@@ -194,11 +194,11 @@ void IRAM_ATTR isr_encoder_btn() {
 // ------------------------------------------------------------------------------
 // HELPER: OVERSAMPLED ADC READING (GENERAL)
 // ------------------------------------------------------------------------------
-float read_adc_voltage(int pin, int samples = 64) {
+float read_adc_voltage(int pin, int samples = 24) {
   uint32_t sum = 0;
   for (int i = 0; i < samples; i++) {
     sum += analogRead(pin);
-    delayMicroseconds(120);
+    delayMicroseconds(30);
   }
   float avg_raw = (float)sum / (float)samples;
   return (avg_raw / ADC_MAX_VAL) * V_REF;
@@ -210,15 +210,15 @@ float read_adc_voltage(int pin, int samples = 64) {
 // Discards top 25% (inductive kickback spikes) & bottom 25% (ground drops),
 // averaging the middle 50% interquartile range to eliminate false 16.78A glitch.
 float read_current_channel_adc(int pin) {
-  const int NUM_SAMPLES = 64;
+  const int NUM_SAMPLES = 32;
   uint16_t samples[NUM_SAMPLES];
 
   for (int i = 0; i < NUM_SAMPLES; i++) {
     samples[i] = analogRead(pin);
-    delayMicroseconds(120); // Spans across multiple 5kHz PWM periods
+    delayMicroseconds(40); // Spans across 5kHz PWM switching periods
   }
 
-  // Insertion sort 64 samples
+  // Insertion sort 32 samples
   for (int i = 1; i < NUM_SAMPLES; i++) {
     uint16_t key = samples[i];
     int j = i - 1;
@@ -229,12 +229,12 @@ float read_current_channel_adc(int pin) {
     samples[j + 1] = key;
   }
 
-  // Discard lowest 16 and highest 16 samples; average middle 32 samples
+  // Discard lowest 8 and highest 8 samples; average middle 16 samples
   uint32_t sum = 0;
-  for (int i = 16; i < 48; i++) {
+  for (int i = 8; i < 24; i++) {
     sum += samples[i];
   }
-  float avg_raw = (float)sum / 32.0f;
+  float avg_raw = (float)sum / 16.0f;
   return (avg_raw / ADC_MAX_VAL) * V_REF;
 }
 
@@ -354,13 +354,19 @@ void read_currents(float &i_motor, float &i_total) {
 float read_temperature_c() {
   static float last_valid_temp = 28.5;
   static unsigned long last_temp_req = 0;
-  if (millis() - last_temp_req > 750) {
-    ds18b20.requestTemperatures();
+  static bool waiting_conversion = false;
+
+  unsigned long now = millis();
+  if (!waiting_conversion && (now - last_temp_req > 1000)) {
+    ds18b20.requestTemperatures(); // Non-blocking! Returns in <1ms
+    last_temp_req = now;
+    waiting_conversion = true;
+  } else if (waiting_conversion && (now - last_temp_req > 200)) {
     float t = ds18b20.getTempCByIndex(0);
     if (t > -50.0 && t < 125.0) {
       last_valid_temp = t;
     }
-    last_temp_req = millis();
+    waiting_conversion = false;
   }
   return last_valid_temp;
 }
@@ -368,7 +374,7 @@ float read_temperature_c() {
 static float filtered_vib = 0.18f;
 
 float read_vibration_g() {
-  const int SAMPLES = 80;
+  const int SAMPLES = 30;
   uint16_t min_raw = 4095;
   uint16_t max_raw = 0;
 
@@ -376,7 +382,7 @@ float read_vibration_g() {
     uint16_t raw = analogRead(PIN_VIB_ANALOG);
     if (raw < min_raw) min_raw = raw;
     if (raw > max_raw) max_raw = raw;
-    delayMicroseconds(60);
+    delayMicroseconds(25);
   }
 
   uint16_t pk_pk = (max_raw >= min_raw) ? (max_raw - min_raw) : 0;
@@ -788,9 +794,10 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_CLK), isr_encoder_clk, CHANGE);
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_SW), isr_encoder_btn, FALLING);
 
-  // Initialize Temperature Sensor
+  // Initialize Temperature Sensor (Asynchronous non-blocking)
   ds18b20.begin();
-  ds18b20.setResolution(10); // 10-bit resolution = ~187ms conversion time
+  ds18b20.setResolution(10);
+  ds18b20.setWaitForConversion(false);
 
   // Calibrate current sensors with motor offline
   calibrate_current_sensors();
@@ -807,26 +814,11 @@ void setup() {
 // ARDUINO MAIN LOOP
 // ------------------------------------------------------------------------------
 void loop() {
-  // 1. Service Incoming Web Clients (HTTP REST)
-  server.handleClient();
+  // 1. HARDWARE-FIRST: INSTANT ROTARY ENCODER KNOB & BUTTON PROCESSING (0ms Latency)
+  static int current_applied_pwm = 0;
+  static int last_handled_enc_pos = -1;
+  static bool last_handled_running = false;
 
-  // 2. Service Incoming UDP Packets (Remote Wireless Commands)
-  int udp_packet_size = udp.parsePacket();
-  if (udp_packet_size > 0) {
-    char udp_buf[256];
-    int len = udp.read(udp_buf, sizeof(udp_buf) - 1);
-    if (len > 0) {
-      udp_buf[len] = 0;
-      String cmd = String(udp_buf);
-      String res = execute_command(cmd);
-      // Reply to sender
-      udp.beginPacket(udp.remoteIP(), udp.remotePort());
-      udp.write((const uint8_t*)res.c_str(), res.length());
-      udp.endPacket();
-    }
-  }
-
-  // 3. Handle Knob Switch Toggle (Start / Pause or Reset Trip)
   if (encoder_btn_pressed) {
     encoder_btn_pressed = false;
     if (safety_tripped) {
@@ -845,10 +837,45 @@ void loop() {
       Serial.printf("[MANUAL] Motor State: %s (Target PWM: %d)\n",
                     motor_running ? "RUNNING" : "STOPPED", encoder_position);
     }
+    // DIRECT HARDWARE ACTUATION
+    int target_pwm = (motor_running && !safety_tripped) ? encoder_position : 0;
+    apply_motor_speed(target_pwm, motor_dir_forward);
+    motor_pwm_target = target_pwm;
+    current_applied_pwm = target_pwm;
+    last_handled_enc_pos = encoder_position;
+    last_handled_running = motor_running;
   }
 
-  // 4. Soft-start slew rate limiter (prevents startup inrush current spike)
-  static int current_applied_pwm = 0;
+  // Instant Hardware Reaction to Physical Rotary Knob Turn
+  if (encoder_position != last_handled_enc_pos || motor_running != last_handled_running) {
+    last_handled_enc_pos = encoder_position;
+    last_handled_running = motor_running;
+    int target_pwm = (motor_running && !safety_tripped) ? encoder_position : 0;
+    apply_motor_speed(target_pwm, motor_dir_forward);
+    motor_pwm_target = target_pwm;
+    current_applied_pwm = target_pwm;
+  }
+
+  // 2. Service Incoming Web Clients (HTTP REST)
+  server.handleClient();
+
+  // 3. Service Incoming UDP Packets (Remote Wireless Commands)
+  int udp_packet_size = udp.parsePacket();
+  if (udp_packet_size > 0) {
+    char udp_buf[256];
+    int len = udp.read(udp_buf, sizeof(udp_buf) - 1);
+    if (len > 0) {
+      udp_buf[len] = 0;
+      String cmd = String(udp_buf);
+      String res = execute_command(cmd);
+      // Reply to sender
+      udp.beginPacket(udp.remoteIP(), udp.remotePort());
+      udp.write((const uint8_t*)res.c_str(), res.length());
+      udp.endPacket();
+    }
+  }
+
+  // 4. Remote software command slew-rate limiter
   static unsigned long last_ramp_time = 0;
   if (millis() - last_ramp_time >= 15) {
     last_ramp_time = millis();
@@ -857,9 +884,10 @@ void loop() {
       current_applied_pwm = desired_pwm;
     } else {
       if (current_applied_pwm < desired_pwm) {
-        current_applied_pwm = min(desired_pwm, current_applied_pwm + 8);
+        if (current_applied_pwm < 140 && desired_pwm >= 150) current_applied_pwm = 150; // Jump over stall floor immediately
+        else current_applied_pwm = min(desired_pwm, current_applied_pwm + 12);
       } else if (current_applied_pwm > desired_pwm) {
-        current_applied_pwm = max(desired_pwm, current_applied_pwm - 16);
+        current_applied_pwm = max(desired_pwm, current_applied_pwm - 20);
       }
     }
     apply_motor_speed(current_applied_pwm, motor_dir_forward);
