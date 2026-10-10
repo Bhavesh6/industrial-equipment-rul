@@ -121,6 +121,10 @@ class HardwareSerialBridge:
         self.last_wireless_packet_time = 0
         self.wireless_packets_received = 0
         self.last_db_log_time = 0
+        self.bat_volt_buffer = collections.deque(maxlen=20)
+        self.cell1_buffer = collections.deque(maxlen=20)
+        self.cell2_buffer = collections.deque(maxlen=20)
+        self.cell3_buffer = collections.deque(maxlen=20)
 
     def start(self):
         t_ser = threading.Thread(target=self._worker_loop, daemon=True, name="SerialBridgeWorker")
@@ -153,6 +157,68 @@ class HardwareSerialBridge:
             self.is_sweeping = False
             print("[SWEEP] Automated characterization sweep completed.")
 
+    def _smooth_battery_telemetry(self, data):
+        """Calculate running average and smoothed values for battery & cell voltages."""
+        if not isinstance(data, dict):
+            return data
+        try:
+            # 1. Total battery pack voltage running average
+            raw_v = float(data.get("battery_voltage", 0.0))
+            if raw_v > 5.0:
+                self.bat_volt_buffer.append(raw_v)
+                v_avg = round(sum(self.bat_volt_buffer) / len(self.bat_volt_buffer), 2)
+            else:
+                v_avg = raw_v
+
+            # 2. Individual cell voltages running average
+            raw_c1 = float(data.get("cell1", 0.0))
+            raw_c2 = float(data.get("cell2", 0.0))
+            raw_c3 = float(data.get("cell3", 0.0))
+
+            if raw_c1 > 1.0:
+                self.cell1_buffer.append(raw_c1)
+                c1_avg = round(sum(self.cell1_buffer) / len(self.cell1_buffer), 2)
+            else:
+                c1_avg = raw_c1
+
+            if raw_c2 > 1.0:
+                self.cell2_buffer.append(raw_c2)
+                c2_avg = round(sum(self.cell2_buffer) / len(self.cell2_buffer), 2)
+            else:
+                c2_avg = raw_c2
+
+            if raw_c3 > 1.0:
+                self.cell3_buffer.append(raw_c3)
+                c3_avg = round(sum(self.cell3_buffer) / len(self.cell3_buffer), 2)
+            else:
+                c3_avg = raw_c3
+
+            c_min = min(c1_avg, c2_avg, c3_avg)
+            c_max = max(c1_avg, c2_avg, c3_avg)
+            delta_avg = round(c_max - c_min, 2)
+
+            data["battery_voltage_raw"] = raw_v
+            data["battery_voltage_avg"] = v_avg
+            data["battery_voltage"] = v_avg  # Stable smoothed pack voltage
+
+            data["cell1_raw"] = raw_c1
+            data["cell1_avg"] = c1_avg
+            data["cell1"] = c1_avg
+
+            data["cell2_raw"] = raw_c2
+            data["cell2_avg"] = c2_avg
+            data["cell2"] = c2_avg
+
+            data["cell3_raw"] = raw_c3
+            data["cell3_avg"] = c3_avg
+            data["cell3"] = c3_avg
+
+            data["cell_delta_avg"] = delta_avg
+            data["cell_delta"] = delta_avg
+        except Exception:
+            pass
+        return data
+
     def _udp_worker_loop(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -173,6 +239,7 @@ class HardwareSerialBridge:
                 if line.startswith("{") and line.endswith("}"):
                     try:
                         data = json.loads(line)
+                        data = self._smooth_battery_telemetry(data)
                         now = time.time()
                         pred = None
                         if ml_predictor is not None:
@@ -256,6 +323,7 @@ class HardwareSerialBridge:
                     if line.startswith("{") and line.endswith("}"):
                         try:
                             data = json.loads(line)
+                            data = self._smooth_battery_telemetry(data)
                             pred = None
                             if ml_predictor is not None:
                                 try:

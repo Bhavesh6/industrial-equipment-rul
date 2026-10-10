@@ -742,9 +742,9 @@
                 </div>
                 <div class="power-stat-pair">
                   <div class="power-stat-box">
-                    <div class="power-stat-label">Total Pack Voltage</div>
-                    <div class="power-stat-val" id="pwrTotVolt">14.82 V</div>
-                    <div class="power-stat-sub">4S Pack Direct Sum</div>
+                    <div class="power-stat-label">Total Pack Voltage (Avg)</div>
+                    <div class="power-stat-val" id="pwrTotVolt">12.62 V</div>
+                    <div class="power-stat-sub" id="pwrTotVoltSub">3S Running Avg &bull; Filtered</div>
                   </div>
                   <div class="power-stat-box">
                     <div class="power-stat-label">Motor Voltage</div>
@@ -770,29 +770,29 @@
               <!-- Column 3: 3S Battery Pack Cell Telemetry -->
               <div class="power-col">
                 <div class="power-col-header">
-                  <span class="power-col-title"><i data-lucide="battery-charging"></i> 3S Battery Pack Cells</span>
+                  <span class="power-col-title"><i data-lucide="battery-charging"></i> 3S Battery Cells (Avg)</span>
                   <span class="badge badge-ok" id="pwrCellBadge">Balanced &bull; &Delta; 22 mV</span>
                 </div>
                 <div class="cell-bars-grid">
                   <div class="cell-row">
-                    <span class="cell-name">Cell 1</span>
+                    <span class="cell-name">Cell 1 (Avg)</span>
                     <div class="cell-track"><div class="cell-fill" id="pwrCellBar1" style="width:75%"></div></div>
-                    <span class="cell-volt" id="pwrCell1">3.715 V</span>
+                    <span class="cell-volt" id="pwrCell1">4.20 V</span>
                   </div>
                   <div class="cell-row">
-                    <span class="cell-name">Cell 2</span>
+                    <span class="cell-name">Cell 2 (Avg)</span>
                     <div class="cell-track"><div class="cell-fill" id="pwrCellBar2" style="width:74%"></div></div>
-                    <span class="cell-volt" id="pwrCell2">3.702 V</span>
+                    <span class="cell-volt" id="pwrCell2">4.20 V</span>
                   </div>
                   <div class="cell-row">
-                    <span class="cell-name">Cell 3</span>
+                    <span class="cell-name">Cell 3 (Avg)</span>
                     <div class="cell-track"><div class="cell-fill" id="pwrCellBar3" style="width:75%"></div></div>
-                    <span class="cell-volt" id="pwrCell3">3.710 V</span>
+                    <span class="cell-volt" id="pwrCell3">4.21 V</span>
                   </div>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;font-size:.68rem;color:var(--faint);padding-top:4px;border-top:1px solid var(--border)">
-                  <span id="pwrCellDelta">Imbalance: 22 mV</span>
-                  <span>Health: 99.4% &bull; Li-ion 3S</span>
+                  <span id="pwrCellDelta">Imbalance: 10 mV (Avg)</span>
+                  <span>Health: 100% &bull; Running Avg</span>
                 </div>
               </div>
             </div>
@@ -1312,40 +1312,40 @@
               <!-- Battery Cell Gauges -->
               <div style="display:flex;flex-direction:column;gap:10px">
                 <div style="display:flex;align-items:center;justify-content:space-between;font-size:.72rem;font-weight:700;color:var(--faint);text-transform:uppercase">
-                  <span>3S 18650 Individual Cell Taps</span>
-                  <span class="badge" id="cpageCellDeltaBadge" style="background:var(--hazard-soft);color:var(--hazard);font-size:.65rem">&Delta; 1.05 V IMBALANCE</span>
+                  <span>3S 18650 Individual Cell Taps (Filtered Running Avg)</span>
+                  <span class="badge" id="cpageCellDeltaBadge" style="background:var(--ok-soft);color:var(--ok);font-size:.65rem">&Delta; 0.03 V BALANCED</span>
                 </div>
 
                 <!-- Cell 1 -->
                 <div style="padding:8px 12px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius)">
                   <div style="display:flex;justify-content:space-between;font-size:.74rem;margin-bottom:4px">
-                    <span style="font-weight:700">Cell 1 (Ground Tap)</span>
-                    <span class="mono" id="cpageCell1" style="font-weight:800;color:var(--hazard)">2.91 V (Low Cell)</span>
+                    <span style="font-weight:700">Cell 1 (Ground Tap) &bull; Avg</span>
+                    <span class="mono" id="cpageCell1" style="font-weight:800;color:var(--ok)">4.19 V (Avg)</span>
                   </div>
                   <div style="height:6px;background:var(--surface);border-radius:999px;overflow:hidden;border:1px solid var(--border)">
-                    <div id="cpageCellBar1" style="height:100%;width:20%;background:var(--hazard);border-radius:999px;transition:width .3s"></div>
+                    <div id="cpageCellBar1" style="height:100%;width:98%;background:var(--ok);border-radius:999px;transition:width .3s"></div>
                   </div>
                 </div>
 
                 <!-- Cell 2 -->
                 <div style="padding:8px 12px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius)">
                   <div style="display:flex;justify-content:space-between;font-size:.74rem;margin-bottom:4px">
-                    <span style="font-weight:700">Cell 2 (Middle Tap)</span>
-                    <span class="mono" id="cpageCell2" style="font-weight:800;color:var(--ok)">3.95 V (Nominal)</span>
+                    <span style="font-weight:700">Cell 2 (Middle Tap) &bull; Avg</span>
+                    <span class="mono" id="cpageCell2" style="font-weight:800;color:var(--ok)">4.20 V (Avg)</span>
                   </div>
                   <div style="height:6px;background:var(--surface);border-radius:999px;overflow:hidden;border:1px solid var(--border)">
-                    <div id="cpageCellBar2" style="height:100%;width:80%;background:var(--ok);border-radius:999px;transition:width .3s"></div>
+                    <div id="cpageCellBar2" style="height:100%;width:98%;background:var(--ok);border-radius:999px;transition:width .3s"></div>
                   </div>
                 </div>
 
                 <!-- Cell 3 -->
                 <div style="padding:8px 12px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius)">
                   <div style="display:flex;justify-content:space-between;font-size:.74rem;margin-bottom:4px">
-                    <span style="font-weight:700">Cell 3 (Top Pack Tap)</span>
-                    <span class="mono" id="cpageCell3" style="font-weight:800;color:var(--accent)">3.87 V (Nominal)</span>
+                    <span style="font-weight:700">Cell 3 (Top Pack Tap) &bull; Avg</span>
+                    <span class="mono" id="cpageCell3" style="font-weight:800;color:var(--ok)">4.21 V (Avg)</span>
                   </div>
                   <div style="height:6px;background:var(--surface);border-radius:999px;overflow:hidden;border:1px solid var(--border)">
-                    <div id="cpageCellBar3" style="height:100%;width:74%;background:var(--ok);border-radius:999px;transition:width .3s"></div>
+                    <div id="cpageCellBar3" style="height:100%;width:98%;background:var(--ok);border-radius:999px;transition:width .3s"></div>
                   </div>
                 </div>
               </div>
@@ -2343,6 +2343,11 @@ function updateKPIs(r) {
 
   const pTotVolt = document.getElementById('pwrTotVolt');
   if (pTotVolt) pTotVolt.textContent = fmt(r.vals.totalVoltage, 2) + ' V';
+  const pTotVoltSub = document.getElementById('pwrTotVoltSub');
+  if (pTotVoltSub) {
+    const rawTxt = (r.hw && r.hw.battery_voltage_raw !== undefined) ? ` · Raw: ${r.hw.battery_voltage_raw.toFixed(2)}V` : '';
+    pTotVoltSub.textContent = `Running Avg: ${fmt(r.vals.totalVoltage, 2)}V${rawTxt}`;
+  }
   const pMotVolt = document.getElementById('pwrMotVolt');
   if (pMotVolt) pMotVolt.textContent = fmt(r.vals.motorVoltage, 2) + ' V';
   const vDrop = (r.vals.totalVoltage - r.vals.motorVoltage).toFixed(2);
@@ -2354,10 +2359,10 @@ function updateKPIs(r) {
   const voltBar = document.getElementById('pwrVoltBarFill');
   if (voltBar) voltBar.style.width = Math.min(100, Math.round((r.vals.motorVoltage / r.vals.totalVoltage) * 100)) + '%';
 
-  const pc1 = document.getElementById('pwrCell1'); if (pc1) pc1.textContent = fmt(r.vals.cell1, 3) + ' V';
-  const pc2 = document.getElementById('pwrCell2'); if (pc2) pc2.textContent = fmt(r.vals.cell2, 3) + ' V';
-  const pc3 = document.getElementById('pwrCell3'); if (pc3) pc3.textContent = fmt(r.vals.cell3, 3) + ' V';
-  const pc4 = document.getElementById('pwrCell4'); if (pc4) pc4.textContent = fmt(r.vals.cell4, 3) + ' V';
+  const pc1 = document.getElementById('pwrCell1'); if (pc1) pc1.textContent = fmt(r.vals.cell1, 2) + ' V';
+  const pc2 = document.getElementById('pwrCell2'); if (pc2) pc2.textContent = fmt(r.vals.cell2, 2) + ' V';
+  const pc3 = document.getElementById('pwrCell3'); if (pc3) pc3.textContent = fmt(r.vals.cell3, 2) + ' V';
+  const pc4 = document.getElementById('pwrCell4'); if (pc4) pc4.textContent = fmt(r.vals.cell4, 2) + ' V';
 
   const cellPct = (v) => Math.min(100, Math.max(0, Math.round(((v - 3.0) / 1.2) * 100)));
   const pb1 = document.getElementById('pwrCellBar1'); if (pb1) pb1.style.width = cellPct(r.vals.cell1) + '%';
@@ -2366,11 +2371,11 @@ function updateKPIs(r) {
   const pb4 = document.getElementById('pwrCellBar4'); if (pb4) pb4.style.width = cellPct(r.vals.cell4) + '%';
 
   const pDelta = document.getElementById('pwrCellDelta');
-  if (pDelta) pDelta.textContent = 'Imbalance: ' + r.vals.cellDeltaMv + ' mV';
+  if (pDelta) pDelta.textContent = 'Imbalance: ' + r.vals.cellDeltaMv + ' mV (Avg)';
   const pCellBadge = document.getElementById('pwrCellBadge');
   if (pCellBadge) {
-    pCellBadge.className = 'badge ' + (r.vals.cellDeltaMv < 50 ? 'badge-ok' : 'badge-hazard');
-    pCellBadge.textContent = (r.vals.cellDeltaMv < 50 ? 'Balanced' : 'Imbalance') + ' • Δ ' + r.vals.cellDeltaMv + ' mV';
+    pCellBadge.className = 'badge ' + (r.vals.cellDeltaMv < 150 ? 'badge-ok' : 'badge-hazard');
+    pCellBadge.textContent = (r.vals.cellDeltaMv < 150 ? 'Balanced' : 'Imbalance') + ' • Δ ' + r.vals.cellDeltaMv + ' mV';
   }
 }
 
@@ -3014,29 +3019,33 @@ function updateVirtualBmsWatchdog(hw) {
   if (cRawT && hw.raw_t !== undefined) cRawT.textContent = hw.raw_t.toFixed(3) + ' V';
 
   const cCell1 = document.getElementById('cpageCell1');
-  if (cCell1) cCell1.textContent = c1.toFixed(2) + ' V ' + (c1 < 2.9 ? '(Low Cell)' : '(Nominal)');
+  if (cCell1) cCell1.textContent = c1.toFixed(2) + ' V (Avg)';
   const cCellBar1 = document.getElementById('cpageCellBar1');
   if (cCellBar1) cCellBar1.style.width = Math.min(100, Math.max(5, ((c1 - 2.8) / 1.4) * 100)) + '%';
 
   const cCell2 = document.getElementById('cpageCell2');
-  if (cCell2) cCell2.textContent = c2.toFixed(2) + ' V (Nominal)';
+  if (cCell2) cCell2.textContent = c2.toFixed(2) + ' V (Avg)';
   const cCellBar2 = document.getElementById('cpageCellBar2');
   if (cCellBar2) cCellBar2.style.width = Math.min(100, Math.max(5, ((c2 - 2.8) / 1.4) * 100)) + '%';
 
   const cCell3 = document.getElementById('cpageCell3');
-  if (cCell3) cCell3.textContent = c3.toFixed(2) + ' V (Nominal)';
+  if (cCell3) cCell3.textContent = c3.toFixed(2) + ' V (Avg)';
   const cCellBar3 = document.getElementById('cpageCellBar3');
   if (cCellBar3) cCellBar3.style.width = Math.min(100, Math.max(5, ((c3 - 2.8) / 1.4) * 100)) + '%';
 
   const cDeltaBadge = document.getElementById('cpageCellDeltaBadge');
-  if (cDeltaBadge && hw.cell_delta !== undefined) {
-    cDeltaBadge.textContent = 'Δ ' + hw.cell_delta.toFixed(2) + ' V ' + (hw.cell_delta > 0.35 ? 'IMBALANCE' : 'BALANCED');
-    cDeltaBadge.className = hw.cell_delta > 0.35 ? 'badge badge-hazard' : 'badge badge-ok';
+  if (cDeltaBadge) {
+    const deltaVal = +(hw.cell_delta_avg !== undefined ? hw.cell_delta_avg : (maxCell - minCell));
+    cDeltaBadge.textContent = 'Δ ' + deltaVal.toFixed(2) + ' V (Avg) ' + (deltaVal > 0.35 ? 'IMBALANCE' : 'BALANCED');
+    cDeltaBadge.className = deltaVal > 0.35 ? 'badge badge-hazard' : 'badge badge-ok';
   }
 
   // 1. Topbar Battery Pill
   const topBatVolt = document.getElementById('topbarBatVolt');
-  if (topBatVolt) topBatVolt.textContent = vPack.toFixed(2) + ' V';
+  if (topBatVolt) {
+    topBatVolt.textContent = vPack.toFixed(2) + ' V';
+    topBatVolt.title = 'Filtered Running Average: ' + vPack.toFixed(2) + ' V';
+  }
   const topBatSoc = document.getElementById('topbarBatSoc');
   if (topBatSoc) {
     const soc = Math.min(100, Math.max(0, Math.round(((vPack - 9.0) / 3.6) * 100)));

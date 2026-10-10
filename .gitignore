@@ -28,5 +28,8 @@ Thumbs.db
 scratch/
 templates/
 smart-factory-digital-twin/
-.agents/
 *.log
+cloudflared.exe
+*.exe
+.agents/
+~$*
