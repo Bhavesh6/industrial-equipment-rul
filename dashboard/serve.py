@@ -68,6 +68,14 @@ except Exception as e:
     ml_predictor = None
     print(f"[ML] Warning: could not load ML predictor: {e}")
 
+try:
+    from src.data.db import DatabaseManager
+    db_manager = DatabaseManager()
+    print(f"[DB] SQLite Telemetry Historian Initialized ({db_manager.db_path})")
+except Exception as e:
+    db_manager = None
+    print(f"[DB] Warning: could not initialize DatabaseManager: {e}")
+
 
 def find_esp32_port(preferred="COM5"):
     """Detect the COM port connected to the ESP32."""
@@ -112,6 +120,7 @@ class HardwareSerialBridge:
         self.wireless_ip = None
         self.last_wireless_packet_time = 0
         self.wireless_packets_received = 0
+        self.last_db_log_time = 0
 
     def start(self):
         t_ser = threading.Thread(target=self._worker_loop, daemon=True, name="SerialBridgeWorker")
@@ -192,6 +201,14 @@ class HardwareSerialBridge:
                                     "health_index": pred.get("health_index") if pred else None,
                                     "status": pred.get("status") if pred else None,
                                 })
+
+                                # Rate-limited SQLite historian logging at 1 Hz
+                                if db_manager is not None and (now - self.last_db_log_time >= 1.0):
+                                    self.last_db_log_time = now
+                                    try:
+                                        db_manager.insert_telemetry(data, pred)
+                                    except Exception:
+                                        pass
                     except Exception:
                         pass
             except socket.timeout:
@@ -261,6 +278,15 @@ class HardwareSerialBridge:
                                     "health_index": pred.get("health_index") if pred else None,
                                     "status": pred.get("status") if pred else None,
                                 })
+
+                                # Rate-limited SQLite historian logging at 1 Hz
+                                now_ser = time.time()
+                                if db_manager is not None and (now_ser - self.last_db_log_time >= 1.0):
+                                    self.last_db_log_time = now_ser
+                                    try:
+                                        db_manager.insert_telemetry(data, pred)
+                                    except Exception:
+                                        pass
                         except Exception:
                             pass
                     elif line.startswith("[") or "ALERT" in line or "CMD" in line:
@@ -455,6 +481,50 @@ class SCADAHandler(SimpleHTTPRequestHandler):
             self._send_json(404, {"success": False, "message": "Model metrics not found"})
             return
 
+        # 5. Database History endpoint (Historical Prognostics Archive)
+        if clean_path == "/api/history":
+            if db_manager is not None:
+                try:
+                    limit = 60
+                    with db_manager.get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            SELECT r.timestamp, r.device_id, r.battery_voltage, r.motor_voltage,
+                                   r.total_current, r.motor_current, r.temperature, r.vibration,
+                                   h.health_index, h.rul_hours, h.rul_ci_low, h.rul_ci_high,
+                                   h.top_contributor, h.top_contributor_pct, h.status_label
+                            FROM raw_sensor_data r
+                            LEFT JOIN health_features h ON r.id = h.id
+                            ORDER BY r.id DESC LIMIT ?
+                        """, (limit,))
+                        rows = [dict(row) for row in cursor.fetchall()]
+                    self._send_json(200, {"success": True, "count": len(rows), "data": rows})
+                    return
+                except Exception as e:
+                    self._send_json(500, {"success": False, "error": str(e)})
+                    return
+            self._send_json(503, {"success": False, "message": "Database not initialized"})
+            return
+
+        # 6. RAG Knowledge Search endpoint
+        if clean_path == "/api/rag/search":
+            query = ""
+            if "?" in self.path:
+                import urllib.parse
+                params = urllib.parse.parse_qs(self.path.split("?", 1)[1])
+                query = params.get("q", [""])[0]
+            if not query:
+                self._send_json(400, {"success": False, "message": "Missing query parameter 'q'"})
+                return
+            try:
+                from rag.retriever import rag_retriever
+                results = rag_retriever.search(query, top_k=3, telemetry=hardware_bridge.latest_telemetry)
+                self._send_json(200, {"success": True, "query": query, "results": results})
+                return
+            except Exception as e:
+                self._send_json(500, {"success": False, "error": str(e)})
+                return
+
         # Fallback to static asset serving
         super().do_GET()
 
@@ -629,9 +699,11 @@ class SCADAHandler(SimpleHTTPRequestHandler):
             telemetry = data.get("telemetry")
             role = data.get("role") or "admin"
 
-            # If telemetry is not provided by client, enrich with live hardware snapshot
+            # If telemetry is not provided by client, enrich with live hardware snapshot and ML predictions
             if not telemetry and hardware_bridge.latest_telemetry:
-                telemetry = hardware_bridge.latest_telemetry
+                telemetry = {**hardware_bridge.latest_telemetry, "prediction": hardware_bridge.latest_prediction}
+            elif telemetry and isinstance(telemetry, dict) and hardware_bridge.latest_prediction and "prediction" not in telemetry:
+                telemetry["prediction"] = hardware_bridge.latest_prediction
 
             if not message.strip():
                 self._send_json(400, {"success": False, "message": "No message supplied"})

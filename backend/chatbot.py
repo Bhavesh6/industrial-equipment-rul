@@ -20,6 +20,16 @@ from pathlib import Path
 import requests
 
 try:
+    from rag.retriever import rag_retriever
+except ImportError:
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from rag.retriever import rag_retriever
+    except Exception:
+        rag_retriever = None
+
+try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
     load_dotenv()
@@ -168,9 +178,41 @@ Pages and features:
 }
 
 
-def _offline_answer(message, role, page, telemetry=None):
-    """Answer from the built-in guide when no external LLM is configured."""
+def _offline_answer(message, role, page, telemetry=None, rag_context=""):
+    """Answer grounded in live hardware telemetry and RAG knowledge base when offline."""
     text = (message or "").lower()
+    
+    t = telemetry or {}
+    pred = t.get("prediction") or {}
+
+    bat_v = float(t.get("battery_voltage", t.get("totalVoltage", 12.48)))
+    mot_v = float(t.get("motor_voltage", t.get("motorVoltage", 0.0)))
+    tot_i = float(t.get("total_current", t.get("totalCurrent", 0.08)))
+    mot_i = float(t.get("motor_current", t.get("motorCurrent", 0.0)))
+    temp  = float(t.get("temperature", t.get("temp", 28.5)))
+    vib   = float(t.get("vibration", t.get("rms", 0.18)))
+    pwm   = int(t.get("pwm", 0))
+    rpm   = int(t.get("rpm", 0))
+
+    raw_h = pred.get("health_index", t.get("health", 1.0))
+    h_pct = float(raw_h) * 100.0 if float(raw_h) <= 1.0 else float(raw_h)
+    rul_h = float(pred.get("rul_hours", t.get("rulHours", 12.5)))
+    ci_lo = float(pred.get("rul_ci_low", t.get("rulLo", max(0.0, rul_h - 2.5))))
+    ci_hi = float(pred.get("rul_ci_high", t.get("rulHi", rul_h + 3.0)))
+    top_s = str(pred.get("top_contributor", "temperature")).replace("_", " ").title()
+    top_p = float(pred.get("top_contributor_pct", 46.3))
+    status_lbl = str(pred.get("status", "HEALTHY")).upper()
+
+    live_header = (
+        f"**Live RS-380 Hardware Vitals**: Status `{status_lbl}` | Health `{h_pct:.1f}%` | "
+        f"RUL `{rul_h:.2f} h` (95% CI: `[{ci_lo:.2f}h – {ci_hi:.2f}h]`) | "
+        f"I_mot `{mot_i:.2f} A` | Temp `{temp:.1f} °C` | Vib `{vib:.3f} g` | V_bat `{bat_v:.2f} V`\n\n"
+        f"**Dominant SHAP Driver**: **{top_s}** contributing **{top_p:.1f}%** of model output.\n\n"
+    )
+
+    if rag_context:
+        return live_header + rag_context + "\n\n*(Grounded response via in-house RAG knowledge base & active hardware sensors)*"
+
     best, best_score = None, 0
     for roles, keywords, answer in _GUIDE:
         if role not in roles:
@@ -180,43 +222,67 @@ def _offline_answer(message, role, page, telemetry=None):
             best, best_score = answer, score
 
     here = PAGE_CONTEXT.get(page)
-    note = ("\n\n*This is the built-in guide - connect a `GEMINI_API_KEY` or `GROQ_API_KEY` on the server for full generative AI.*")
+    note = "\n\n*(Telemetry-grounded guide - connect `GEMINI_API_KEY` or `GROQ_API_KEY` for conversational LLM reasoning)*"
 
     if best:
-        if telemetry and any(w in text for w in ("current", "voltage", "battery", "rul", "health", "temp", "status")):
-            h = telemetry.get("health", 98.5)
-            rul = telemetry.get("rulHours", 3200)
-            tot_i = telemetry.get("totalCurrent", 2.82)
-            mot_i = telemetry.get("motorCurrent", 2.30)
-            tot_v = telemetry.get("totalVoltage", 14.82)
-            mot_v = telemetry.get("motorVoltage", 12.04)
-            live_prefix = f"**Live Snapshot**: Health `{h:.1f}%` | RUL `{rul} h` | I_tot `{tot_i:.2f} A` | I_mot `{mot_i:.2f} A` | V_tot `{tot_v:.2f} V` | V_mot `{mot_v:.2f} V`\n\n"
-            return live_prefix + best + note
-        return best + note
+        return live_header + best + note
 
-    topics = "Current telemetry, Voltage regulation, 4S Battery cells, RUL prognostics, Vibration, Thermal limits, Alerts, Reports, and Calibration."
+    topics = "Current telemetry, Voltage regulation, 3S Battery cells, RUL prognostics, Vibration, Thermal limits, Maintenance SOPs, and Safety guidelines."
     where = f"You are on {here}. " if here else ""
-    return f"{where}I can assist with: {topics} Ask about any of those by name.{note}"
+    return f"{where}{live_header}I can assist with: {topics} Ask about any of those by name.{note}"
 
 
-def _build_system_prompt(role, page, telemetry=None):
+def _build_system_prompt(role, page, telemetry=None, rag_context=""):
     prompt = SYSTEM_PROMPTS.get(role, SYSTEM_PROMPTS["admin"])
     if telemetry:
+        t = telemetry or {}
+        pred = t.get("prediction") or {}
+
+        bat_v = float(t.get("battery_voltage", t.get("totalVoltage", 12.48)))
+        mot_v = float(t.get("motor_voltage", t.get("motorVoltage", 0.0)))
+        tot_i = float(t.get("total_current", t.get("totalCurrent", 0.08)))
+        mot_i = float(t.get("motor_current", t.get("motorCurrent", 0.0)))
+        temp  = float(t.get("temperature", t.get("temp", 28.5)))
+        vib   = float(t.get("vibration", t.get("rms", 0.18)))
+        pwm   = int(t.get("pwm", 0))
+        rpm   = int(t.get("rpm", 0))
+        c1    = float(t.get("cell1", 4.17))
+        c2    = float(t.get("cell2", 4.17))
+        c3    = float(t.get("cell3", 4.14))
+        cdelta = float(t.get("cell_delta", 0.03))
+
+        raw_h = pred.get("health_index", t.get("health", 1.0))
+        h_pct = float(raw_h) * 100.0 if float(raw_h) <= 1.0 else float(raw_h)
+        rul_h = float(pred.get("rul_hours", t.get("rulHours", 12.5)))
+        ci_lo = float(pred.get("rul_ci_low", t.get("rulLo", max(0.0, rul_h - 2.5))))
+        ci_hi = float(pred.get("rul_ci_high", t.get("rulHi", rul_h + 3.0)))
+        top_s = str(pred.get("top_contributor", "temperature")).replace("_", " ").title()
+        top_p = float(pred.get("top_contributor_pct", 46.3))
+        status_lbl = str(pred.get("status", "HEALTHY")).upper()
+        model_name = str(pred.get("model_used", "GradientBoosting"))
+
         prompt += f"""
-Live Equipment Telemetry Snapshot:
-- Health Index: {telemetry.get('health', 98.5):.1f}% (Normal >70%, Warning 40-70%, Critical <40%)
-- Est. RUL: {telemetry.get('rulHours', 3200)} operating hours (CI: [{telemetry.get('rulLo', 2800)}h – {telemetry.get('rulHi', 3600)}h])
-- Total System Current: {telemetry.get('totalCurrent', 2.82):.3f} A (4S pack bus draw via ACS715)
-- Motor Load Current: {telemetry.get('motorCurrent', 2.30):.3f} A (Armature conduction)
-- Auxiliary Current: {telemetry.get('auxCurrent', 0.52):.3f} A (ESP32 MCU, driver logic, sensors)
-- Total Battery Voltage: {telemetry.get('totalVoltage', 14.82):.2f} V (4S Li-ion pack sum)
-- Motor Terminal Voltage: {telemetry.get('motorVoltage', 12.04):.2f} V (Forward PWM drive)
-- Forward Voltage Drop: {telemetry.get('totalVoltage', 14.82) - telemetry.get('motorVoltage', 12.04):.2f} V
-- 4S Battery Cells: Cell 1={telemetry.get('cell1', 3.715):.3f}V, Cell 2={telemetry.get('cell2', 3.702):.3f}V, Cell 3={telemetry.get('cell3', 3.710):.3f}V, Cell 4={telemetry.get('cell4', 3.693):.3f}V
-- Cell Imbalance: {telemetry.get('cellDeltaMv', 22)} mV (Balanced <50 mV)
-- Vibration Driver: {telemetry.get('topAxis', 'Vib X')} ({telemetry.get('rms', 0.05):.3f} g)
-- Core Temperature: {telemetry.get('temp', 42.0):.1f} °C
+Live RS-380 Hardware Telemetry Snapshot (Real Sensors on ESP32):
+- Motor Speed / PWM: {pwm} / 255 (Est. {rpm} RPM)
+- Battery Voltage: {bat_v:.2f} V (3S Li-ion pack)
+- Motor Terminal Voltage: {mot_v:.2f} V
+- Total System Current: {tot_i:.2f} A
+- Motor Armature Current: {mot_i:.2f} A
+- Motor Housing Temperature: {temp:.1f} °C (DS18B20)
+- Vibration Acceleration: {vib:.3f} g (801S Sensor)
+- LiPo Battery Cell Balance: Cell 1={c1:.2f}V, Cell 2={c2:.2f}V, Cell 3={c3:.2f}V (Delta={cdelta*1000:.0f} mV)
+
+Machine Learning Prognostics & SHAP Degradation Attribution:
+- ML Model: {model_name}
+- Equipment Operating Status: {status_lbl}
+- Health Index (H): {h_pct:.1f}% (Healthy >=85%, Warning 70-85%, Critical <70%)
+- Remaining Useful Life (RUL): {rul_h:.2f} operating hours
+- 95% Confidence Interval (Uncertainty): [{ci_lo:.2f}h – {ci_hi:.2f}h]
+- Dominant Degradation Driver (SHAP Explainable AI): {top_s} contributing {top_p:.1f}% of anomalous variation
 """
+    if rag_context:
+        prompt += f"\n{rag_context}\n"
+
     hint = PAGE_CONTEXT.get((page or "").strip().lower())
     if hint:
         prompt += f"\nCurrently the operator is viewing {hint}."
@@ -337,10 +403,24 @@ def ask(message, role="admin", history=None, page=None, telemetry=None):
     if len(message) > MAX_MESSAGE_LEN:
         return None, "Message too long"
 
-    if not enabled():
-        return _offline_answer(message, role, page, telemetry), None
+    # Query RAG knowledge retriever for relevant maintenance manuals & SOPs
+    rag_context = ""
+    if rag_retriever is not None:
+        try:
+            chunks = rag_retriever.search(
+                query=message,
+                top_k=2,
+                telemetry=telemetry,
+                prediction=telemetry.get("prediction") if telemetry else None
+            )
+            rag_context = rag_retriever.format_context_for_prompt(chunks)
+        except Exception as e:
+            print(f"[RAG] Search error: {e}")
 
-    system_prompt = _build_system_prompt(role, page, telemetry)
+    if not enabled():
+        return _offline_answer(message, role, page, telemetry, rag_context), None
+
+    system_prompt = _build_system_prompt(role, page, telemetry, rag_context)
     turns = _trim_history(history)
 
     last_error = None

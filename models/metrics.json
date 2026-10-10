@@ -137,5 +137,58 @@
       "temperature_delta": 0.001551
     }
   },
-  "shap_summary": {}
+  "shap_summary": {
+    "feature_level": {
+      "vibration": 0.079421,
+      "temperature": 0.110668,
+      "motor_current": 0.013773,
+      "total_current": 0.053022,
+      "motor_voltage": 0.041632,
+      "battery_voltage": 0.016985,
+      "battery_voltage_rms": 0.081052,
+      "battery_voltage_roll_mean": 0.156251,
+      "battery_voltage_roll_std": 0.106457,
+      "battery_voltage_delta": 0.004678,
+      "motor_voltage_rms": 0.029317,
+      "motor_voltage_roll_mean": 0.023508,
+      "motor_voltage_roll_std": 0.096472,
+      "motor_voltage_delta": 0.007978,
+      "total_current_rms": 0.034401,
+      "total_current_roll_mean": 0.135545,
+      "total_current_roll_std": 0.048035,
+      "total_current_delta": 0.005078,
+      "motor_current_rms": 0.049958,
+      "motor_current_roll_mean": 0.134103,
+      "motor_current_roll_std": 0.090473,
+      "motor_current_delta": 0.021742,
+      "temperature_rms": 0.120598,
+      "temperature_roll_mean": 1.390075,
+      "temperature_roll_std": 0.058056,
+      "temperature_delta": 0.011679,
+      "vibration_rms": 0.136162,
+      "vibration_roll_mean": 0.49227,
+      "vibration_roll_std": 0.097427,
+      "vibration_delta": 0.006744,
+      "power_w": 0.039484,
+      "voltage_ratio": 0.012847,
+      "thermal_stress": 0.139807
+    },
+    "sensor_level": {
+      "vibration": 0.812024,
+      "temperature": 1.691076,
+      "motor_current": 0.310049,
+      "total_current": 0.276081,
+      "motor_voltage": 0.198907,
+      "battery_voltage": 0.365423
+    },
+    "sensor_level_pct": {
+      "vibration": 22.2,
+      "temperature": 46.3,
+      "motor_current": 8.5,
+      "total_current": 7.6,
+      "motor_voltage": 5.4,
+      "battery_voltage": 10.0
+    },
+    "sample_size": 1500
+  }
 }
