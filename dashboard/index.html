@@ -280,6 +280,11 @@
     /* ══════════════ TOPBAR SCROLL SHADOW ══════════════ */
     .topbar { transition: box-shadow 200ms; }
 
+    /* ══════════════ HARDWARE HUD TOAST ══════════════ */
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
   </style>
 </head>
 <body>
@@ -372,6 +377,13 @@
           <i data-lucide="wifi" id="topbarWifiIcon" style="width:14px;height:14px;color:var(--ok)"></i>
           <span id="topbarWifiLabel">192.168.4.1</span>
         </button>
+
+        <!-- Physical Rotary Knob Live Activity Pill -->
+        <div id="topbarKnobPill" style="display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--surface);font-size:.72rem;font-weight:600;color:var(--muted);transition:all .3s ease" title="Physical KY-040 Rotary Encoder Knob on ESP32">
+          <span class="live-dot" id="topbarKnobDot" style="width:6px;height:6px;border-radius:50%;background:var(--muted)"></span>
+          <i data-lucide="disc" style="width:13px;height:13px;color:var(--accent)"></i>
+          <span id="topbarKnobText">Knob: Standby (0 PWM)</span>
+        </div>
 
         <span class="live-pill is-live" id="globalLivePill">
           <span class="live-dot"></span>Live · <span id="liveHz">5</span> Hz
@@ -547,6 +559,16 @@
                     <span class="mono" style="font-size:.85rem;color:var(--muted)">/ 255</span>
                     <span class="badge badge-info mono" id="ctrlSpeedPct" style="font-size:.8rem;font-weight:700">0%</span>
                   </div>
+                </div>
+
+                <!-- Live Physical Hardware Rotary Knob Tracker -->
+                <div id="overviewKnobBanner" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:.74rem;transition:all .25s ease">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span class="live-dot" id="knobActivityDot" style="width:7px;height:7px;border-radius:50%;background:var(--muted)"></span>
+                    <span style="color:var(--muted)"><i data-lucide="disc" style="width:13px;height:13px;vertical-align:middle;margin-right:2px;color:var(--accent)"></i> Physical Knob (KY-040):</span>
+                    <strong class="mono" id="overviewKnobActionText" style="color:var(--ink)">Standby (PWM 0)</strong>
+                  </div>
+                  <span class="badge" id="overviewKnobStateBadge" style="font-size:.65rem;background:var(--surface-alt);color:var(--muted)">STANDBY</span>
                 </div>
 
                 <!-- Range Slider -->
@@ -3080,6 +3102,135 @@ function updateControlPanelFromHw(hw) {
   if (currEl) currEl.textContent = (hw.motor_current !== undefined ? hw.motor_current : 0).toFixed(2) + ' A';
   const tempEl = document.getElementById('ctrlLiveTemp');
   if (tempEl) tempEl.textContent = (hw.temperature !== undefined ? hw.temperature : 0).toFixed(1) + ' °C';
+
+  // Live Physical Knob HUD Feedback
+  handlePhysicalKnobFeedback(hw);
+}
+
+let lastKnownHwPwm = null;
+let knobEventTimeout = null;
+
+function handlePhysicalKnobFeedback(hw) {
+  const pwm = hw.pwm !== undefined ? hw.pwm : 0;
+  const isRunning = pwm > 0;
+  const rpm = hw.rpm || 0;
+  const v_mot = (hw.motor_voltage !== undefined ? hw.motor_voltage : 0).toFixed(2);
+  const i_mot = (hw.motor_current !== undefined ? hw.motor_current : 0).toFixed(2);
+
+  if (lastKnownHwPwm === null) {
+    lastKnownHwPwm = pwm;
+    return;
+  }
+
+  if (pwm !== lastKnownHwPwm) {
+    let action = '';
+    let badgeClass = 'badge-info';
+    let isCw = pwm > lastKnownHwPwm;
+    if (lastKnownHwPwm === 0 && pwm > 0) {
+      action = `Knob Click / Start: PWM ${pwm}`;
+      badgeClass = 'badge-ok';
+    } else if (isCw) {
+      action = `Turned CW: PWM ${pwm} (+${pwm - lastKnownHwPwm})`;
+      badgeClass = 'badge-ok';
+    } else if (pwm > 0) {
+      action = `Turned CCW: PWM ${pwm} (-${lastKnownHwPwm - pwm})`;
+      badgeClass = 'badge-hazard';
+    } else {
+      action = 'Knob Stop: Motor Standby (0 PWM)';
+      badgeClass = 'badge-warning';
+    }
+
+    // 1. Topbar Knob Pill
+    const topPill = document.getElementById('topbarKnobPill');
+    const topText = document.getElementById('topbarKnobText');
+    const topDot  = document.getElementById('topbarKnobDot');
+    if (topText) topText.textContent = isRunning ? `Knob: ${action}` : 'Knob: Standby (0 PWM)';
+    if (topDot) topDot.style.background = isRunning ? 'var(--ok)' : 'var(--muted)';
+    if (topPill) {
+      topPill.style.borderColor = isRunning ? 'var(--ok)' : 'var(--border)';
+      topPill.style.background = isRunning ? 'var(--ok-soft)' : 'var(--surface)';
+      topPill.style.color = isRunning ? 'var(--ok)' : 'var(--muted)';
+    }
+
+    // 2. Overview Card Banner
+    const ovBanner = document.getElementById('overviewKnobBanner');
+    const ovText   = document.getElementById('overviewKnobActionText');
+    const ovBadge  = document.getElementById('overviewKnobStateBadge');
+    const ovDot    = document.getElementById('knobActivityDot');
+    if (ovText) ovText.textContent = isRunning ? `${action} • ${rpm} RPM • ${v_mot}V • ${i_mot}A` : 'Standby / Stopped (0 PWM)';
+    if (ovDot) ovDot.style.background = isRunning ? 'var(--ok)' : 'var(--muted)';
+    if (ovBadge) {
+      ovBadge.className = 'badge ' + badgeClass;
+      ovBadge.textContent = isRunning ? `PWM ${pwm}` : 'STANDBY';
+    }
+    if (ovBanner) {
+      ovBanner.style.borderColor = isRunning ? 'var(--accent)' : 'var(--border)';
+      ovBanner.style.background = isRunning ? 'var(--surface-alt)' : 'var(--surface)';
+      ovBanner.style.boxShadow = isRunning ? '0 0 10px rgba(217,119,6,0.25)' : 'none';
+    }
+
+    // 3. SCADA Console Log
+    appendConsoleLog(`[PHYSICAL KNOB] ${action} | RPM: ${rpm} | ${v_mot}V | ${i_mot}A`, isRunning ? 'resp' : 'err');
+
+    // 4. Floating HUD Toast
+    showHardwareKnobToast(action, pwm, rpm, v_mot, i_mot);
+
+    clearTimeout(knobEventTimeout);
+    knobEventTimeout = setTimeout(() => {
+      if (topPill && !isRunning) {
+        topPill.style.background = 'var(--surface)';
+        topPill.style.borderColor = 'var(--border)';
+        topPill.style.color = 'var(--muted)';
+      }
+      if (ovBanner) {
+        ovBanner.style.boxShadow = 'none';
+        ovBanner.style.borderColor = 'var(--border)';
+      }
+    }, 4000);
+
+    lastKnownHwPwm = pwm;
+  }
+}
+
+function showHardwareKnobToast(action, pwm, rpm, v_mot, i_mot) {
+  let container = document.getElementById('knobToastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'knobToastContainer';
+    container.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:99999;pointer-events:none;display:flex;flex-direction:column;gap:8px';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  const isRunning = pwm > 0;
+  toast.style.cssText = `
+    display:flex;align-items:center;gap:12px;padding:12px 18px;
+    background:var(--surface);border:2px solid ${isRunning ? 'var(--accent)' : 'var(--border)'};
+    border-radius:var(--radius-md);box-shadow:var(--shadow-md);color:var(--ink);
+    font-size:.82rem;font-weight:600;min-width:320px;
+    animation:toastIn .25s ease-out;pointer-events:auto;
+  `;
+  toast.innerHTML = `
+    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${isRunning ? 'var(--ok)' : 'var(--muted)'};box-shadow:0 0 8px ${isRunning ? 'var(--ok)' : 'transparent'}"></span>
+    <div style="flex:1">
+      <div style="font-weight:700;color:var(--accent);display:flex;align-items:center;gap:6px">
+        <i data-lucide="disc" style="width:14px;height:14px"></i> Physical Hardware Knob Event
+      </div>
+      <div style="font-size:.78rem;margin-top:2px;color:var(--ink)">${action}</div>
+      <div class="mono" style="font-size:.7rem;color:var(--muted);margin-top:2px">
+        ${rpm} RPM &bull; ${v_mot} V &bull; ${i_mot} A
+      </div>
+    </div>
+  `;
+  container.appendChild(toast);
+  if (window.lucide && lucide.createIcons) lucide.createIcons({ root: toast });
+
+  setTimeout(() => {
+    toast.style.transition = 'opacity .3s ease, transform .3s ease';
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(10px)';
+    setTimeout(() => toast.remove(), 350);
+  }, 3500);
 }
 
 function transformHardwareTelemetry(hw, pred) {
