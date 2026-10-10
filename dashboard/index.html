@@ -397,19 +397,19 @@
     <!-- Content -->
     <div class="content">
 
-      <!-- Virtual Software BMS & Charger Safety Alerts (Protects Unprotected 3S Pack Without Physical BMS) -->
+      <!-- Software BMS & Battery Safety Alerts -->
       <div id="bmsChargeAlarmBanner" style="display:none;margin-bottom:16px;padding:12px 16px;border-radius:var(--radius);background:#fef2f2;border:2px solid #ef4444;color:#991b1b;box-shadow:0 4px 14px rgba(239,68,68,0.2)">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
           <div style="display:flex;align-items:center;gap:12px">
             <i data-lucide="alert-triangle" style="width:24px;height:24px;color:#dc2626;flex-shrink:0"></i>
             <div>
-              <strong style="font-size:.85rem;color:#b91c1c;text-transform:uppercase;letter-spacing:.05em">⚠️ CRITICAL: UNPLUG CHARGER NOW — OVERCHARGE DANGER!</strong>
+              <strong style="font-size:.85rem;color:#b91c1c;text-transform:uppercase;letter-spacing:.05em">⚠️ BATTERY CHARGER WARNING</strong>
               <div style="font-size:.78rem;color:#7f1d1d;margin-top:2px" id="bmsChargeAlarmText">
-                No physical BMS is installed on this 3S pack! Cell voltage has reached safe charging cutoff (> 4.15V). Unplug the charger immediately to prevent irreversible battery degradation or fire hazard.
+                Cell voltage reached full cutoff. If charger is plugged in, unplug it now.
               </div>
             </div>
           </div>
-          <button type="button" class="btn btn-sm" onclick="dismissChargeAlarm()" style="background:#dc2626;border-color:#b91c1c;color:#fff;font-size:.72rem;font-weight:700">ACKNOWLEDGE</button>
+          <button type="button" class="btn btn-sm" onclick="confirmChargerUnplugged()" style="background:#16a34a;border-color:#15803d;color:#fff;font-size:.75rem;font-weight:700;padding:6px 14px">✓ CHARGER UNPLUGGED (RUNNING ON BATTERY)</button>
         </div>
       </div>
 
@@ -2917,8 +2917,22 @@ function updateHardwareStatus(connected, port = 'COM5', transport = 'USB_SERIAL'
   }
 }
 
-// ─────────── VIRTUAL BMS & CHARGING WATCHDOG ───────────
-let chargeAlarmDismissedUntil = 0;
+// ─────────── SOFTWARE BMS & BATTERY WATCHDOG ───────────
+let chargerUnplugged = true; // default true: operating on battery power
+localStorage.setItem('charger_unplugged', 'true');
+
+function confirmChargerUnplugged() {
+  chargerUnplugged = true;
+  localStorage.setItem('charger_unplugged', 'true');
+  const b = document.getElementById('bmsChargeAlarmBanner');
+  if (b) b.style.display = 'none';
+  const pill = document.getElementById('topbarBatSoc');
+  if (pill) pill.title = 'Battery Pack: Charger Unplugged';
+}
+
+function dismissChargeAlarm() {
+  confirmChargerUnplugged();
+}
 
 function updateVirtualBmsWatchdog(hw) {
   if (!hw) return;
@@ -2987,16 +3001,18 @@ function updateVirtualBmsWatchdog(hw) {
   // 2. Overcharge Watchdog (Protects raw 3S 18650 cells without physical BMS)
   const chargeBanner = document.getElementById('bmsChargeAlarmBanner');
   const chargeText = document.getElementById('bmsChargeAlarmText');
-  const now = Date.now();
-  if (maxCell >= 4.15 && now > chargeAlarmDismissedUntil) {
+  const isDangerousOvervolt = maxCell >= 4.45;
+  const isChargingOvercharge = (!chargerUnplugged) && (maxCell >= 4.25);
+
+  if (isDangerousOvervolt || isChargingOvercharge) {
     if (chargeBanner) {
       chargeBanner.style.display = 'block';
       let cellName = c1 === maxCell ? 'Cell 1' : (c2 === maxCell ? 'Cell 2' : 'Cell 3');
       if (chargeText) {
-        chargeText.textContent = `${cellName} has reached ${maxCell.toFixed(2)} V! Pack total is ${vPack.toFixed(2)} V. Without a physical hardware BMS, continued charging risks thermal runaway. UNPLUG CHARGER NOW!`;
+        chargeText.textContent = `${cellName} has reached ${maxCell.toFixed(2)} V! Pack total is ${vPack.toFixed(2)} V. If charger is attached, unplug it now.`;
       }
     }
-  } else if (chargeBanner && maxCell < 4.12) {
+  } else if (chargeBanner) {
     chargeBanner.style.display = 'none';
   }
 
@@ -3008,18 +3024,12 @@ function updateVirtualBmsWatchdog(hw) {
     if (undervoltBanner) {
       undervoltBanner.style.display = 'block';
       if (undervoltText) {
-        undervoltText.textContent = `Lowest cell reached ${minCell.toFixed(2)} V (< 2.80V cutoff). Virtual BMS has automatically cut motor power to protect unprotected 18650 cells. Recharge 3S pack.`;
+        undervoltText.textContent = `Lowest cell reached ${minCell.toFixed(2)} V (< 2.80V cutoff). Software BMS has automatically cut motor power to protect unprotected 18650 cells. Recharge 3S pack.`;
       }
     }
   } else if (undervoltBanner && minCell >= 2.90) {
     undervoltBanner.style.display = 'none';
   }
-}
-
-function dismissChargeAlarm() {
-  chargeAlarmDismissedUntil = Date.now() + 120000; // 2 min snooze
-  const b = document.getElementById('bmsChargeAlarmBanner');
-  if (b) b.style.display = 'none';
 }
 
 // ─────────── ADVANCED ACTUATION & DIAGNOSTIC HANDLERS ───────────
