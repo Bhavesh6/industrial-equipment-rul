@@ -58,78 +58,81 @@ def _get_config(key, default=""):
 _GUIDE = [
     (("admin", "operator", "guest"), ("current", "amp", "load", "motor current", "total current"),
      "Current Telemetry Breakdown:\n"
-     "- Total System Current measures gross bus draw from the 4S battery pack via ACS715 (nominal ~2.82 A).\n"
-     "- Motor Load Current isolates armature conduction through the MOSFET H-bridge (nominal ~2.30 A, ~81% of total load).\n"
-     "- Auxiliary Load (~0.52 A) powers the ESP32 MCU, logic drivers, and sensor pull-ups.\n"
-     "If Motor Current spikes above 3.5 A, inspect for mechanical jamming, bearing seizure, or winding faults."),
+     "- Total System Current measures gross bus draw from the 3S battery pack via ACS712 (nominal ~0.20 - 0.50 A).\n"
+     "- Motor Load Current isolates armature conduction through the L298N driver (nominal ~0.35 - 0.45 A no-load, up to 1.8 A loaded).\n"
+     "- Auxiliary Load (~0.08 - 0.15 A) powers the ESP32 MCU, logic drivers, and sensor pull-ups.\n"
+     "If Motor Current spikes above 3.0 A, safety interlock triggers OVERCURRENT_TRIP to prevent winding burnout."),
 
     (("admin", "operator", "guest"), ("voltage", "drop", "motor voltage", "total voltage", "eff"),
      "Voltage Regulation Rail:\n"
-     "- Total Pack Voltage is the direct sum of all 4 battery cells (nominal ~14.82 V).\n"
-     "- Motor Terminal Voltage is the armature PWM drive voltage (nominal ~12.04 V).\n"
-     "- Forward Conduction Drop (ΔV ~2.78 V) represents driver MOSFET R_DS(on) and wiring resistance.\n"
-     "Voltage transfer efficiency typically sits at ~81.2%."),
+     "- Total Pack Voltage is the direct sum of all 3 battery cells (nominal ~11.1 V - 12.6 V).\n"
+     "- Motor Terminal Voltage is the armature PWM drive voltage (scaled from 0V to Pack Voltage).\n"
+     "- Forward Conduction Drop represents driver saturation and wiring resistance.\n"
+     "Voltage is protected by Virtual BMS with a 2.80 V/cell under-voltage cutoff."),
 
     (("admin", "operator", "guest"), ("battery", "cell", "balance", "imbalance", "lipo", "liion"),
-     "4S Battery Pack Cell Telemetry:\n"
-     "- Cell 1 (~3.715 V), Cell 2 (~3.702 V), Cell 3 (~3.710 V), Cell 4 (~3.693 V).\n"
+     "3S Battery Pack Cell Telemetry:\n"
+     "- Cell 1 (~4.20 V), Cell 2 (~4.20 V), Cell 3 (~4.20 V) running averages.\n"
      "- Pack Imbalance (ΔV) is the spread between the highest and lowest cell.\n"
-     "- Threshold: ΔV < 50 mV is considered nominal and balanced. If ΔV exceeds 50 mV, run a BMS cell-balancing cycle."),
+     "- Threshold: ΔV < 150 mV is considered nominal and balanced. If ΔV exceeds 350 mV, the Virtual BMS flags an imbalance warning."),
 
     (("admin", "operator", "guest"), ("rul", "remaining useful life", "hours", "lifetime", "prognostic", "health"),
      "Prognostics & RUL:\n"
-     "- The Health Index (H) operates from 0% (critical failure) to 100% (brand new).\n"
-     "- Est. RUL predicts remaining operating hours until H drops below the 70% maintenance threshold.\n"
-     "- A 95% Confidence Interval (CI) is computed around the prediction (e.g. 2,800 h to 3,600 h).\n"
+     "- The Health Index operates from 0.0 (critical failure) to 1.0 (brand new).\n"
+     "- Est. RUL predicts remaining operating hours with a 95% Confidence Interval (e.g. ±3.53 h) via Gradient Boosting.\n"
+     "- SHAP attribution breaks down the percentage influence of vibration, temperature, currents, and voltages.\n"
      "View detailed degradation curves on the Prognostics page."),
 
     (("admin", "operator", "guest"), ("vibration", "bearing", "harmonic", "shake", "vib", "rms"),
      "Vibration & Mechanical Health:\n"
-     "- Accelerometer tracks Vib X, Vib Y, and Vib Z axes at 2 Hz streaming.\n"
-     "- Top Contributor identifies which axis exhibits highest deviation from baseline.\n"
-     "Recommended checks for high vibration: 1) Verify rotor shaft coupling alignment, 2) Tighten mounting fasteners, 3) Inspect sintered bronze bearings for radial play."),
+     "- Dynamic accelerometer continuously monitors casing vibration magnitude and FFT spectrum.\n"
+     "- Baseline idle vibration is typically 0.15–0.22 g; operating nominal under load is 0.30–0.45 g.\n"
+     "Recommended checks for high vibration: 1) Verify rotor shaft coupling alignment, 2) Tighten mounting fasteners, 3) Inspect bronze bearings for radial play."),
 
     (("admin", "operator", "guest"), ("temp", "temperature", "heat", "hot", "thermal"),
      "Thermal Envelope:\n"
-     "- Motor casing operates nominally around 38–42 °C.\n"
+     "- Motor casing operates nominally around 28–45 °C measured via DS18B20.\n"
      "- Warning threshold is 55 °C; critical thermal shutdown is 70 °C.\n"
      "If temperature rises rapidly, verify cooling airflow and check for dry/unlubricated bearings."),
 
     (("admin", "operator"), ("alert", "threshold", "hazard", "alarm"),
      "Alerts & Alarms:\n"
-     "- Tracks warning and critical severity thresholds for vibration, temperature, and current.\n"
-     "- A critical alert flags immediate operator action required.\n"
+     "- Tracks warning and critical severity thresholds for vibration, temperature, current, and cell balance.\n"
+     "- Emergency Stop (ESTOP) cutoff disengages motor drive immediately.\n"
      "View past events and acknowledgment logs on the Anomaly Alerts page."),
 
-    (("admin",), ("report", "export", "csv", "download"),
-     "Reports & Exports:\n"
-     "- Use the Export button in the top bar to download the live 13-column telemetry log as CSV.\n"
-     "- Includes timestamps, all 3 vibration axes, temperature, total current, motor current, total voltage, motor voltage, and all 4 battery cell voltages."),
+    (("admin",), ("report", "export", "csv", "download", "pdf", "docx"),
+     "Reports & Technical Deliverables:\n"
+     "- Official Project Technical & Experimental Results Report available in PDF and Word DOCX formats under /reports/.\n"
+     "- Includes complete system architecture, mathematical derivations, SHAP analysis, and hardware benchmarks.\n"
+     "- CSV exports of real-time telemetry logs are also available."),
 
     (("admin",), ("calibration", "slider", "baseline", "tune", "sensitivity"),
      "Calibration Console:\n"
-     "- Adjust anomaly detection sensitivity (0–100%) and exponential degradation decay rate (1–30 days).\n"
+     "- Zero-voltage offset calibration and sensitivity trim for ACS712 current sensors.\n"
+     "- Voltage divider trim multipliers for 3S battery cells and overall pack voltage.\n"
      "- Changes take effect immediately across the real-time scoring engine."),
 
     (("admin",), ("audit", "change log", "history of changes"),
      "Audit Log:\n"
      "- Append-only record of system events, parameter changes, and threshold overrides.\n"
-     "- Entries cannot be edited or deleted, ensuring industrial traceability."),
+     "- SQLite Historian logs 1 Hz telemetry frames with complete electrical and mechanical vitals."),
 
     (("admin", "guest"), ("system", "spec", "hardware", "esp32", "rs380"),
      "System Specifications:\n"
-     "- Equipment: RS-380 Brushed DC Motor (12V nominal, 6,200 RPM rated).\n"
-     "- Microcontroller: ESP32 dual-core Xtensa 32-bit @ 240 MHz.\n"
-     "- Sensors: MPU-6050 3-axis accelerometer, ACS715 Hall-effect current sensors, DS18B20 1-wire temperature sensor, 4S Li-ion balance tap ADC."),
+     "- Equipment: Single RS-380 Brushed DC Motor (12V nominal, 6,200 - 12,000 RPM).\n"
+     "- Microcontroller: ESP32 dual-core Xtensa 32-bit @ 240 MHz (Dual Wi-Fi AP + STA + USB Serial).\n"
+     "- Sensors: Dynamic accelerometer vibration sensor, ACS712 Hall-effect current sensors, DS18B20 1-wire temperature sensor, 3S Li-ion balance tap ADC.\n"
+     "- Driver: L298N Dual H-Bridge motor driver with PWM speed regulation and direction control."),
 ]
 
 PAGE_CONTEXT = {
-    "index.html": "the Overview console — live SCADA metrics, 4S battery & DC power distribution card, sensor tiles, and telemetry feed",
+    "index.html": "the Overview console — live SCADA metrics, 3S battery & DC power distribution card, sensor tiles, and telemetry feed",
     "prognostics.html": "the Prognostics page — SHAP degradation attributions, RUL projections, and confidence bands",
     "alerts.html": "the Anomaly Alerts page — critical and warning alarms with live status filtering",
     "waveforms.html": "the Waveform Captures page — 5-channel live oscilloscope view streaming at 2 Hz",
-    "reports.html": "the Reports page — generated summaries and historical CSV export archive",
-    "calibration.html": "the Calibration page — sensitivity sliders and baseline threshold tuning",
+    "reports.html": "the Reports page — generated summaries, official technical reports (PDF/DOCX), and CSV export archive",
+    "calibration.html": "the Calibration page — sensitivity sliders, zero-offsets, and baseline threshold tuning",
     "audit.html": "the Audit Log page — immutable timestamped record of calibrations and operational events",
     "system.html": "the System Info page — ESP32 pinout diagram, firmware status, and RS-380 motor hardware specifications"
 }
@@ -150,14 +153,14 @@ Conversational Style Guidelines:
 SYSTEM_PROMPTS = {
     "guest": _BASE_PROMPT + """
 This person is viewing as a guest or visitor. What they can explore:
-- The live overview testbed demo with real-time sensor streams and electrical telemetry.
+- The live single RS-380 motor testbed with real-time sensor streams and electrical telemetry.
 - RS-380 motor hardware specs, ESP32 microcontroller architecture, and sensor instrumentation.
-- High-level predictive maintenance principles (RUL estimation, vibration harmonics, 4S battery balancing).
+- High-level predictive maintenance principles (RUL estimation, vibration harmonics, 3S battery balancing).
 They cannot modify calibration sliders or download industrial audit archives.
 """,
     "operator": _BASE_PROMPT + """
 This person is a certified plant operator running equipment tests. What they can do:
-- Monitor live operational telemetry: Total Current vs Motor Current, 4S battery cell balance, core temperature, and 3-axis vibration.
+- Monitor live operational telemetry: Total Current vs Motor Current, 3S battery cell balance, core temperature, and dynamic vibration.
 - Check real-time RUL projections and 95% confidence intervals.
 - Acknowledge warning and critical hazard alarms on the Anomaly Alerts page.
 - Review recent telemetry logs and sensor waveforms.
@@ -166,14 +169,14 @@ They cannot modify baseline calibration thresholds or alter system sensitivity s
     "admin": _BASE_PROMPT + """
 This person is a lead diagnostic engineer with full administrative access to the SCADA console.
 Pages and features:
-- Overview: live SCADA KPI rail, DC power subsystem (Total Current, Motor Current, Pack Voltage, Motor Voltage, 4S cell balance), sensor grid, and 13-column live feed.
+- Overview: live SCADA KPI rail, DC power subsystem (Total Current, Motor Current, Pack Voltage, Motor Voltage, 3S cell balance), sensor grid, and live feed.
 - Prognostics: SHAP degradation attribution, RUL probability distributions, and Weibull degradation curves.
 - Anomaly Alerts: warning/critical threshold filters, alarm acknowledgement log, and fault severity tracker.
-- Waveform Captures: 5-channel real-time oscilloscope streaming at 2 Hz.
-- Reports: CSV exports of the 13-channel telemetry feed for any selected timeframe.
-- Calibration: tuning anomaly detection sensitivity (0–100%) and exponential degradation decay rate (1–30 days).
+- Waveform Captures: multi-channel real-time oscilloscope streaming.
+- Reports: official project technical reports (PDF/DOCX) and CSV exports of the telemetry feed.
+- Calibration: tuning current sensor offsets, sensitivity, and 3S voltage divider trims.
 - Audit Log: immutable append-only record of calibrations, alarms, and operator overrides.
-- System Info: ESP32 pinout diagram, firmware version, and RS-380 brushed DC motor technical specifications.
+- System Info: ESP32 pinout diagram, firmware status, and single RS-380 brushed DC motor technical specifications.
 """
 }
 
