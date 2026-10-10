@@ -2352,7 +2352,7 @@ function updateTrajectory(r) {
   const label = timeStr(r.ts);
   trajData.labels.push(label);
   trajData.health.push(r.health);
-  trajData.rul_norm.push(Math.min(100, r.rulHours / 32));
+  trajData.rul_norm.push(Math.min(100, Math.max(0, +( (r.rulHours / 20.0) * 100 ).toFixed(1))));
   if (trajData.labels.length > MAX_TRAJ) {
     trajData.labels.shift(); trajData.health.shift(); trajData.rul_norm.shift();
   }
@@ -2524,7 +2524,8 @@ function refreshPrognostics() {
   const r = telemetryLog[0];
   const pred = r.pred || window.latestHwPred || {};
   const hw = r.hw || window.latestHwData || {};
-  const deg = degradationFactor();
+  const healthRatio = (pred.health_index !== undefined) ? (pred.health_index > 1.0 ? pred.health_index / 100.0 : pred.health_index) : (r.health / 100.0);
+  const deg = Math.max(0, 1.0 - healthRatio);
 
   // 1. TRUE SHAP FEATURE ATTRIBUTION FROM ML MODEL
   let weights = {};
