@@ -121,6 +121,8 @@ Preferences prefs;
 
 const char* AP_SSID              = "RS380-SCADA-WIFI";
 const char* AP_PASS              = "scadapassword";
+const char* FALLBACK_STA_SSID    = "orangehouse";
+const char* FALLBACK_STA_PASS    = "asdfghjkl09";
 const int   UDP_PORT             = 8888;
 String      latest_json_packet   = "{}";
 String      wifi_active_ip       = "192.168.4.1";
@@ -718,11 +720,16 @@ void setup_wireless() {
   Serial.printf("[WIFI] Access Point Active: SSID '%s' (Pass: '%s') @ IP %s\n",
                 AP_SSID, AP_PASS, wifi_active_ip.c_str());
 
-  // 2. Try connecting to stored Station credentials in NVS
+  // 2. Try connecting to stored Station credentials in NVS (or fallback to Option 1)
   prefs.begin("scada_wifi", true);
   String saved_ssid = prefs.getString("ssid", "");
   String saved_pass = prefs.getString("pass", "");
   prefs.end();
+
+  if (saved_ssid.length() == 0) {
+    saved_ssid = String(FALLBACK_STA_SSID);
+    saved_pass = String(FALLBACK_STA_PASS);
+  }
 
   if (saved_ssid.length() > 0) {
     Serial.printf("[WIFI] Connecting to Station SSID: '%s'...\n", saved_ssid.c_str());
@@ -948,10 +955,16 @@ void loop() {
     // Channel A: USB Serial Output
     Serial.print(json_buf);
 
-    // Channel B: High-Speed UDP Wireless Broadcast
+    // Channel B: High-Speed UDP Wireless Broadcast (AP + Station subnets)
     udp.beginPacket(IPAddress(255, 255, 255, 255), UDP_PORT);
     udp.write((const uint8_t*)json_buf, strlen(json_buf));
     udp.endPacket();
+
+    if (WiFi.status() == WL_CONNECTED) {
+      udp.beginPacket(WiFi.broadcastIP(), UDP_PORT);
+      udp.write((const uint8_t*)json_buf, strlen(json_buf));
+      udp.endPacket();
+    }
   }
 
   // 6. Handle Incoming USB Serial Commands
