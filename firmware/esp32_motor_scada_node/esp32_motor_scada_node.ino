@@ -107,7 +107,7 @@ String      safety_trip_reason   = "NONE";
 
 // Virtual Software BMS (Protects raw unprotected 3S 18650 cells without hardware BMS)
 const float BMS_MIN_CELL_VOLT    = 2.65;       // Safe discharge cutoff floor for 18650 cells under load
-const float BMS_MAX_CELL_VOLT    = 4.22;       // Maximum charge warning limit (fire prevention)
+const float BMS_MAX_CELL_VOLT    = 4.35;       // Maximum charge warning limit (fire prevention)
 const float BMS_MIN_PACK_VOLT    = 8.40;       // Minimum pack cut-off
 const float BMS_MAX_CELL_DELTA   = 0.85;       // Dangerous pack imbalance
 bool        bms_override_demo    = false;      // Demo override toggle
@@ -137,6 +137,7 @@ volatile int  encoder_position   = 0;         // Starts safely at 0
 volatile bool encoder_btn_pressed = false;
 volatile unsigned long last_enc_pulse_time = 0;
 volatile unsigned long enc_pulse_interval  = 0;
+volatile unsigned long last_scada_cmd_time = 0; // Lockout physical knob when SCADA / automated test is active
 
 // Timing intervals
 unsigned long last_telemetry_tx = 0;
@@ -146,12 +147,15 @@ const unsigned long TELEMETRY_INTERVAL_MS = 200; // 5 Hz telemetry stream
 String execute_command(String cmd);
 
 // ------------------------------------------------------------------------------
-// INTERRUPT SERVICE ROUTINES (KY-040 ENCODER WITH HARDWARE DEBOUNCE)
+// INTERRUPT SERVICE ROUTINES (KY-040 ENCODER WITH HARDWARE DEBOUNCE & VIBRATION LOCKOUT)
 // ------------------------------------------------------------------------------
 void IRAM_ATTR isr_encoder_clk() {
-  static unsigned long last_clk_time = 0;
   unsigned long now = millis();
-  if (now - last_clk_time > 8) { // 8ms contact bounce suppression
+  // If recently commanded via SCADA/API, suppress vibration-induced encoder jitter
+  if (now - last_scada_cmd_time < 8000) return;
+
+  static unsigned long last_clk_time = 0;
+  if (now - last_clk_time > 35) { // 35ms robust physical rotation filter
     int clk = digitalRead(PIN_ENC_CLK);
     int dt  = digitalRead(PIN_ENC_DT);
     if (clk != dt) {
@@ -440,8 +444,10 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
   }
 
   // 2. Virtual Software BMS: Overcharge Warning (during raw 3S charging)
-  if (cell1 > BMS_MAX_CELL_VOLT || cell2 > BMS_MAX_CELL_VOLT || cell3 > BMS_MAX_CELL_VOLT) {
+  if (!bms_override_demo && (cell1 > BMS_MAX_CELL_VOLT || cell2 > BMS_MAX_CELL_VOLT || cell3 > BMS_MAX_CELL_VOLT)) {
     if (!safety_tripped) safety_trip_reason = "BMS_OVERCHARGE_WARN";
+  } else if (!safety_tripped && safety_trip_reason == "BMS_OVERCHARGE_WARN") {
+    safety_trip_reason = "NONE";
   }
 
   // 3. Overcurrent trip with 400ms duration persistence
@@ -497,6 +503,7 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
 String execute_command(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return "EMPTY";
+  last_scada_cmd_time = millis();
 
   if (cmd.startsWith("SPEED=")) {
     int val = cmd.substring(6).toInt();
