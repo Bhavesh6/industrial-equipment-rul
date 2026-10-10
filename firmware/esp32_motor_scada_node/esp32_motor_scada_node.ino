@@ -74,10 +74,10 @@ const float V_REF                = 3.30;       // ESP32 ADC full-scale reference
 const float ADC_MAX_VAL          = 4095.0;     // 12-bit ADC
 const float R_DIVIDER_RATIO      = (30.0 + 4.7) / 4.7; // ~7.383
 
-// Individual divider calibration multipliers
-float cal_b1_mult                = 1.000;
-float cal_b2_mult                = 1.000;
-float cal_bpack_mult             = 1.000;
+// Individual divider calibration multipliers (Calibrated for fully charged 3S pack: 12.60V / 4.20V per cell)
+float cal_b1_mult                = 1.4094;
+float cal_b2_mult                = 1.2034;
+float cal_bpack_mult             = 1.1496;
 
 // ACS712 Current Sensor Config
 float acs_sensitivity            = 0.100;      // Volts per Ampere (20A module default: 0.100, 5A: 0.185, 30A: 0.066)
