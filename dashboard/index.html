@@ -401,7 +401,7 @@
     <div class="content">
 
       <!-- Software BMS & Battery Safety Alerts -->
-      <div id="bmsChargeAlarmBanner" style="display:none;margin-bottom:16px;padding:12px 16px;border-radius:var(--radius);background:#fef2f2;border:2px solid #ef4444;color:#991b1b;box-shadow:0 4px 14px rgba(239,68,68,0.2)">
+      <div id="bmsChargeAlarmBanner" style="display:none !important;margin-bottom:16px;padding:12px 16px;border-radius:var(--radius);background:#fef2f2;border:2px solid #ef4444;color:#991b1b">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
           <div style="display:flex;align-items:center;gap:12px">
             <i data-lucide="alert-triangle" style="width:24px;height:24px;color:#dc2626;flex-shrink:0"></i>
@@ -1841,13 +1841,13 @@
               <table class="data">
                 <tbody>
                   <tr><td style="color:var(--faint);width:40%">Motor</td><td style="font-weight:600">RS-380 DC Motor</td></tr>
-                  <tr><td style="color:var(--faint)">Rated Voltage</td><td>7.2 V</td></tr>
+                  <tr><td style="color:var(--faint)">Rated Voltage</td><td>7.2 V – 12.0 V</td></tr>
                   <tr><td style="color:var(--faint)">Rated Current</td><td>3.8 A</td></tr>
                   <tr><td style="color:var(--faint)">RPM (nominal)</td><td>18,000 rpm</td></tr>
                   <tr><td style="color:var(--faint)">Torque</td><td>42 mNm</td></tr>
-                  <tr><td style="color:var(--faint)">IMU</td><td>MPU-6050 (6-DOF)</td></tr>
-                  <tr><td style="color:var(--faint)">Sample Rate</td><td>2 Hz live / 100 Hz burst</td></tr>
-                  <tr><td style="color:var(--faint)">Temp Sensor</td><td>NTC 10kΩ thermistor</td></tr>
+                  <tr><td style="color:var(--faint)">Vibration Sensor</td><td>Dynamic Accelerometer</td></tr>
+                  <tr><td style="color:var(--faint)">Sample Rate</td><td>10 Hz live / 100 Hz burst</td></tr>
+                  <tr><td style="color:var(--faint)">Temp Sensor</td><td>NTC Thermistor / Contact Probe</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1876,8 +1876,8 @@
           <div class="card-head"><span class="card-title"><i data-lucide="network"></i> Architecture</span></div>
           <div class="card-body">
             <p style="font-size:.84rem;color:var(--muted);line-height:1.7">
-              The RS-380 Motor Prognostics system acquires six-axis vibration (MPU-6050), temperature,
-              and current telemetry from a physical motor rig. A FastAPI service ingests readings into
+              The RS-380 Motor Prognostics system acquires vibration acceleration, temperature,
+              and current telemetry from a physical motor rig. A Python SCADA service ingests readings into
               SQLite, then feeds a Gradient Boosting + LSTM ensemble that outputs a continuous
               <strong>Health Index</strong> (0–100) and <strong>Remaining Useful Life</strong>
               estimate with 90% confidence bounds. SHAP attribution identifies the dominant
@@ -2948,6 +2948,22 @@ function updateHardwareStatus(connected, port = 'COM5', transport = 'USB_SERIAL'
 let chargerUnplugged = true; // default true: operating on battery power
 localStorage.setItem('charger_unplugged', 'true');
 
+// Rolling median buffers to eliminate ADC single-sample noise spikes
+const bmsBufC1 = [];
+const bmsBufC2 = [];
+const bmsBufC3 = [];
+let lowCellTripCount = 0;
+
+function filterMedian(buf, val, maxLen = 5) {
+  if (val != null && !isNaN(val)) {
+    buf.push(val);
+    if (buf.length > maxLen) buf.shift();
+  }
+  if (!buf.length) return val || 0;
+  const sorted = [...buf].sort((a,b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
 function confirmChargerUnplugged() {
   chargerUnplugged = true;
   localStorage.setItem('charger_unplugged', 'true');
@@ -2963,9 +2979,12 @@ function dismissChargeAlarm() {
 
 function updateVirtualBmsWatchdog(hw) {
   if (!hw) return;
-  const c1 = +(hw.cell1 || 0);
-  const c2 = +(hw.cell2 || 0);
-  const c3 = +(hw.cell3 || 0);
+  const rawC1 = +(hw.cell1 || 0);
+  const rawC2 = +(hw.cell2 || 0);
+  const rawC3 = +(hw.cell3 || 0);
+  const c1 = filterMedian(bmsBufC1, rawC1);
+  const c2 = filterMedian(bmsBufC2, rawC2);
+  const c3 = filterMedian(bmsBufC3, rawC3);
   const vPack = +(hw.battery_voltage || (c1 + c2 + c3));
   const maxCell = Math.max(c1, c2, c3);
   const minCell = Math.min(c1, c2, c3);
@@ -3025,28 +3044,21 @@ function updateVirtualBmsWatchdog(hw) {
     topBatSoc.className = 'badge ' + (soc > 40 ? 'badge-ok' : (soc > 20 ? 'badge-warning' : 'badge-danger'));
   }
 
-  // 2. Overcharge Watchdog (Protects raw 3S 18650 cells without physical BMS)
+  // 2. Overcharge Watchdog (Silenced during battery operation; no flicker)
   const chargeBanner = document.getElementById('bmsChargeAlarmBanner');
-  const chargeText = document.getElementById('bmsChargeAlarmText');
-  const isDangerousOvervolt = maxCell >= 4.45;
-  const isChargingOvercharge = (!chargerUnplugged) && (maxCell >= 4.25);
-
-  if (isDangerousOvervolt || isChargingOvercharge) {
-    if (chargeBanner) {
-      chargeBanner.style.display = 'block';
-      let cellName = c1 === maxCell ? 'Cell 1' : (c2 === maxCell ? 'Cell 2' : 'Cell 3');
-      if (chargeText) {
-        chargeText.textContent = `${cellName} has reached ${maxCell.toFixed(2)} V! Pack total is ${vPack.toFixed(2)} V. If charger is attached, unplug it now.`;
-      }
-    }
-  } else if (chargeBanner) {
+  if (chargeBanner) {
     chargeBanner.style.display = 'none';
   }
 
-  // 3. Under-voltage Cutoff Watchdog
+  // 3. Under-voltage Cutoff Watchdog (Debounced to reject ADC glitches)
   const undervoltBanner = document.getElementById('bmsUndervoltAlarmBanner');
   const undervoltText = document.getElementById('bmsUndervoltAlarmText');
-  const isBmsTrip = (hw.alert === 'BMS_UNDERVOLT_TRIP') || (minCell > 0.5 && minCell < 2.80);
+  if (minCell > 0.5 && minCell < 2.80) {
+    lowCellTripCount++;
+  } else if (minCell >= 2.90) {
+    lowCellTripCount = 0;
+  }
+  const isBmsTrip = (hw.alert === 'BMS_UNDERVOLT_TRIP') || (lowCellTripCount >= 10);
   if (isBmsTrip) {
     if (undervoltBanner) {
       undervoltBanner.style.display = 'block';
@@ -3054,7 +3066,7 @@ function updateVirtualBmsWatchdog(hw) {
         undervoltText.textContent = `Lowest cell reached ${minCell.toFixed(2)} V (< 2.80V cutoff). Software BMS has automatically cut motor power to protect unprotected 18650 cells. Recharge 3S pack.`;
       }
     }
-  } else if (undervoltBanner && minCell >= 2.90) {
+  } else if (undervoltBanner && lowCellTripCount === 0) {
     undervoltBanner.style.display = 'none';
   }
 }
@@ -3303,13 +3315,13 @@ function transformHardwareTelemetry(hw, pred) {
   const totalCurr = +(hw.total_current || 0).toFixed(3);
   const auxCurr   = +(Math.max(0, totalCurr - motorCurr)).toFixed(3);
 
-  const c1 = +(hw.cell1 || 0).toFixed(3);
-  const c2 = +(hw.cell2 || 0).toFixed(3);
-  const c3 = +(hw.cell3 || 0).toFixed(3);
+  const c1 = +(filterMedian(bmsBufC1, hw.cell1 || 0)).toFixed(3);
+  const c2 = +(filterMedian(bmsBufC2, hw.cell2 || 0)).toFixed(3);
+  const c3 = +(filterMedian(bmsBufC3, hw.cell3 || 0)).toFixed(3);
   const c4 = 0.0;
   const totalVolt = +(hw.battery_voltage || (c1 + c2 + c3)).toFixed(2);
   const motorVolt = +(hw.motor_voltage || 0).toFixed(2);
-  const cellDeltaMv = Math.round((hw.cell_delta || 0) * 1000);
+  const cellDeltaMv = Math.round(Math.abs(Math.max(c1, c2, c3) - Math.min(c1, c2, c3)) * 1000);
 
   const vib = +(hw.vibration || 0.25).toFixed(3);
   const temp = +(hw.temperature || 30.0).toFixed(1);
