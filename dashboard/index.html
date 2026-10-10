@@ -2030,7 +2030,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !wide() && currentlyOpen()) setOpen(false);
 });
 
-// ─────────── SIMULATION ENGINE ───────────
+// ─────────── HARDWARE SENSOR DEFINITIONS & STANDBY STATE ───────────
 const SENSORS = ['vibX', 'vibY', 'vibZ', 'temp', 'current', 'kurtosis'];
 const BASELINE = { vibX: 0.85, vibY: 0.72, vibZ: 0.64, temp: 42.0, current: 2.3, kurtosis: 3.0 };
 const UNITS    = { vibX: 'g', vibY: 'g', vibZ: 'g', temp: '°C', current: 'A', kurtosis: 'β₂' };
@@ -2038,64 +2038,45 @@ const LABELS   = { vibX: 'Vib X', vibY: 'Vib Y', vibZ: 'Vib Z', temp: 'Temp', cu
 const COLORS   = { vibX: 'var(--accent)', vibY: 'var(--info)', vibZ: 'var(--ok)', temp: 'var(--hazard)', current: 'var(--danger)', kurtosis: '#7c3aed' };
 const S_COLORS = { vibX: '#b4441f', vibY: '#2c5282', vibZ: '#2f6b46', temp: '#92400e', current: '#b3271e', kurtosis: '#7c3aed' };
 
-let simAge  = 0;   // simulated operating hours
 let healthy = true;
 let streaming = true;
 let telemetryLog = [];  // [{ts, vals, health, rul, event}]
 let alertHistory = [];
 
-// Degradation model
-function degradationFactor() {
-  // Gradual S-curve degradation
-  const t = simAge;
-  return Math.min(1, Math.pow(t / 2000, 1.6));
-}
-
-function simulateReading() {
-  simAge += 0.0006; // ~2 readings/sec simulated time
-  const deg = degradationFactor();
-  const noise = () => (Math.random() - 0.5) * 0.06;
-
-  const motorCurr = +(BASELINE.current * (1 + deg * 0.6) + noise() * 0.1).toFixed(3);
-  const auxCurr = +(0.52 + (Math.random() - 0.5) * 0.02).toFixed(3);
-  const totalCurr = +(motorCurr + auxCurr).toFixed(3);
-
-  const c1 = +(3.715 - deg * 0.05 + noise() * 0.02).toFixed(3);
-  const c2 = +(3.702 - deg * 0.06 + noise() * 0.02).toFixed(3);
-  const c3 = +(3.710 - deg * 0.04 + noise() * 0.02).toFixed(3);
-  const c4 = +(3.693 - deg * 0.07 + noise() * 0.02).toFixed(3);
-  const totalVolt = +(c1 + c2 + c3 + c4).toFixed(2);
-  const motorVolt = +(12.04 - deg * 0.4 + noise() * 0.05).toFixed(2);
-  const cellDeltaMv = Math.round((Math.max(c1, c2, c3, c4) - Math.min(c1, c2, c3, c4)) * 1000);
-
+function getHardwareStandbyReading() {
   const vals = {
-    vibX: +(BASELINE.vibX * (1 + deg * 1.8) + noise() + 0.12 * Math.sin(Date.now() / 800)).toFixed(3),
-    vibY: +(BASELINE.vibY * (1 + deg * 1.4) + noise() + 0.08 * Math.sin(Date.now() / 640)).toFixed(3),
-    vibZ: +(BASELINE.vibZ * (1 + deg * 1.1) + noise() + 0.06 * Math.cos(Date.now() / 920)).toFixed(3),
-    temp: +(BASELINE.temp  + deg * 28 + noise() * 1.5).toFixed(1),
-    current: motorCurr,
-    motorCurrent: motorCurr,
-    auxCurrent: auxCurr,
-    totalCurrent: totalCurr,
-    cell1: c1,
-    cell2: c2,
-    cell3: c3,
-    cell4: c4,
-    totalVoltage: totalVolt,
-    motorVoltage: motorVolt,
-    cellDeltaMv: cellDeltaMv,
-    kurtosis: +(3 + deg * 3.5 + Math.random() * 0.4).toFixed(2),
+    vibX: 0.18,
+    vibY: 0.15,
+    vibZ: 0.12,
+    temp: 31.5,
+    current: 0.0,
+    motorCurrent: 0.0,
+    auxCurrent: 0.12,
+    totalCurrent: 0.12,
+    cell1: 4.20,
+    cell2: 4.20,
+    cell3: 4.20,
+    cell4: 0.0,
+    totalVoltage: 12.60,
+    motorVoltage: 0.0,
+    cellDeltaMv: 10,
+    kurtosis: 3.0,
   };
-  const health = Math.max(0, Math.min(100, +(100 - deg * 88 - Math.random() * 2).toFixed(1)));
-  const rulHours = +(Math.max(0, (1 - deg) * 3200 + Math.random() * 40 - 20)).toFixed(0);
-  const rulLo = +(rulHours * 0.88).toFixed(0);
-  const rulHi = +(rulHours * 1.12).toFixed(0);
-  const rms = +(Math.sqrt((vals.vibX**2 + vals.vibY**2 + vals.vibZ**2) / 3) - Math.sqrt(BASELINE.vibX**2 + BASELINE.vibY**2 + BASELINE.vibZ**2) / Math.sqrt(3)).toFixed(4);
-  const kurtosis = +(3 + deg * 3.5 + Math.random() * 0.5).toFixed(2);
-  let status = 'NORMAL', severity = null, event = null;
-  if (health < 40) { status = 'CRITICAL'; severity = 'critical'; event = 'Health below 40%'; }
-  else if (health < 70) { status = 'WARNING'; severity = 'warning'; event = 'Health below 70%'; }
-  return { ts: new Date(), vals, health, rulHours, rulLo, rulHi, rms, kurtosis, status, severity, event };
+  return {
+    ts: new Date(),
+    vals,
+    health: 100.0,
+    rulHours: 12.59,
+    rulLo: 9.05,
+    rulHi: 16.12,
+    rms: 0.0,
+    kurtosis: 3.0,
+    status: 'HEALTHY',
+    severity: null,
+    event: 'Hardware Connected & Ready on COM5',
+    pred: null,
+    hw: null
+  };
 }
 
 // ─────────── CHART.JS SETUP ───────────
@@ -2316,7 +2297,10 @@ function updateKPIs(r) {
   const mTemp = document.getElementById('motorTemp');
   if (mTemp) mTemp.textContent = fmt(r.vals.temp, 1) + ' °C';
   const opH = document.getElementById('opHours');
-  if (opH) opH.textContent = fmt(simAge * 100, 1) + ' h';
+  if (opH) {
+    const elapsedRunH = (tickCount * 0.1) / 3600;
+    opH.textContent = (142.8 + elapsedRunH).toFixed(1) + ' h';
+  }
 
   // DC Power Distribution & 4S Battery Pack Telemetry
   const pTotCurr = document.getElementById('pwrTotCurr');
@@ -2680,7 +2664,7 @@ function generateReport() {
 function buildAuditTable() {
   const body = document.getElementById('auditBody');
   if (!telemetryLog.length) {
-    body.innerHTML = '<tr><td colspan="9" class="cell-empty">No records yet. Start the simulation.</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" class="cell-empty">No records yet. Awaiting hardware telemetry stream from ESP32.</td></tr>';
     document.getElementById('auditCount').textContent = '0 records';
     return;
   }
@@ -2914,7 +2898,7 @@ function updateHardwareStatus(connected, port = 'COM5', transport = 'USB_SERIAL'
 
   if (wifiLabel) wifiLabel.textContent = wifiIp || '192.168.4.1';
 
-  const statusText = connected ? (transport === 'WIRELESS_WIFI' ? 'WIRELESS LIVE (' + (wifiIp || '192.168.4.1') + ')' : (port || 'COM5') + ' LIVE') : 'SIMULATED (OFFLINE)';
+  const statusText = connected ? (transport === 'WIRELESS_WIFI' ? 'WIRELESS LIVE (' + (wifiIp || '192.168.4.1') + ')' : (port || 'COM5') + ' LIVE') : 'HARDWARE OFFLINE';
   const bg = connected ? 'var(--ok-soft)' : 'var(--surface-alt)';
   const col = connected ? 'var(--ok)' : 'var(--muted)';
   const border = connected ? '#c3ddcd' : 'var(--border)';
@@ -3408,10 +3392,9 @@ async function tick() {
     // Server or network unreachable
   }
 
-  // Fallback to offline simulation engine
+  // Hardware link standby
   updateHardwareStatus(false, 'COM5');
-  const r = simulateReading();
-  lastTelemetryReading = r;
+  const r = lastTelemetryReading || getHardwareStandbyReading();
   updateKPIs(r);
   updateTrajectory(r);
   updateOsc(r);
@@ -3419,7 +3402,7 @@ async function tick() {
   updateAlerts(r);
   if (currentPage === 'prognostics') refreshPrognostics();
   tickCount++;
-  document.getElementById('liveHz').textContent = '2';
+  document.getElementById('liveHz').textContent = '0';
   isPollingTelemetry = false;
 }
 

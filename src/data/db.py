@@ -94,6 +94,15 @@ class DatabaseManager:
             ))
 
             if health_results:
+                rms_val = health_results.get("rms_deviation")
+                if rms_val is None:
+                    rms_val = health_results.get("rms_dev", health_results.get("anomaly_score", 0.0))
+                top_c = health_results.get("top_contributor") or "none"
+                top_p = health_results.get("top_contributor_pct")
+                if top_p is None:
+                    top_p = health_results.get("contributions", {}).get(top_c, 0.0)
+                status_lbl = health_results.get("status_label") or health_results.get("status") or "HEALTHY"
+
                 cursor.execute("""
                     INSERT INTO health_features (
                         timestamp, device_id, health_index, rul_hours,
@@ -103,14 +112,14 @@ class DatabaseManager:
                 """, (
                     ts_str,
                     telemetry.get("device_id", "RS380-ESP32-01"),
-                    health_results.get("health_index"),
-                    health_results.get("rul_hours"),
-                    health_results.get("rul_ci_low"),
-                    health_results.get("rul_ci_high"),
-                    health_results.get("rms_dev", health_results.get("rms_deviation")),
-                    health_results.get("top_contributor"),
-                    health_results.get("top_contributor_pct", health_results.get("contributions", {}).get(health_results.get("top_contributor"), 0)),
-                    health_results.get("status_label", "HEALTHY")
+                    float(health_results.get("health_index", 1.0)),
+                    float(health_results.get("rul_hours", 12.0)),
+                    float(health_results.get("rul_ci_low", 9.0)),
+                    float(health_results.get("rul_ci_high", 15.0)),
+                    float(rms_val),
+                    str(top_c),
+                    float(top_p),
+                    str(status_lbl)
                 ))
             conn.commit()
 

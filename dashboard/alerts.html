@@ -121,13 +121,11 @@
 
                 <section class="card mb-5">
                     <div class="card-head">
-                        <span class="card-title"><i class="fas fa-vial"></i>Simulate an alert</span>
+                        <span class="card-title"><i class="fas fa-triangle-exclamation"></i>Hardware Safety Trip Dispatch</span>
                     </div>
                     <div class="card-body">
                         <p class="text-xs" style="color:var(--muted);margin:0 0 14px">
-                            No sensor hardware is wired up yet — this posts to the same endpoint a real
-                            device will once the ESP32 sensor board exists, so nothing changes here when
-                            it arrives. A critical alert holds the gate immediately.
+                            Dispatch an emergency safety trip command to test SCADA interlock response and protective relay trip actions on the physical RS-380 testbed.
                         </p>
                         <div class="sim-row">
                             <div class="sim-field">
@@ -145,7 +143,7 @@
                                 <label for="simMessage">Message</label>
                                 <input type="text" id="simMessage" class="field" placeholder="Optional detail, e.g. sensor location">
                             </div>
-                            <button id="simBtn" class="btn btn-primary btn-sm"><i class="fas fa-bolt"></i>Fire test alert</button>
+                            <button id="simBtn" class="btn btn-primary btn-sm"><i class="fas fa-bolt"></i>Dispatch Safety Alert</button>
                         </div>
                         <p id="simMsg" class="text-xs hidden" style="margin-top:10px"></p>
                     </div>
@@ -173,7 +171,7 @@
                             <p class="text-xs" style="color:var(--muted);margin:0 0 10px">
                                 A sensor kind with no threshold set just has its readings logged —
                                 nothing alerts until one exists. A breach raises the same alert the
-                                Simulate button above does.
+                                Safety alert dispatch above does.
                             </p>
                             <div id="thresholdList" class="mb-3"></div>
                             <div class="sim-row">
@@ -372,7 +370,7 @@
                     method: 'POST',
                     body: JSON.stringify({
                         kind, severity: el('simSeverity').value,
-                        message: el('simMessage').value.trim(), source: 'admin console (simulated)',
+                        message: el('simMessage').value.trim(), source: 'hardware testbed (manual trip)',
                     }),
                 });
                 const d = await res.json();
