@@ -391,6 +391,9 @@
         <button class="btn btn-outline btn-sm" onclick="downloadTelemetryCsv()">
           <i data-lucide="file-spreadsheet" aria-hidden="true"></i><span class="btn-label">Export</span>
         </button>
+        <a href="/reports/PROJECT_TECHNICAL_REPORT.pdf" target="_blank" class="btn btn-outline btn-sm" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none" title="Open Official Technical & Experimental Report (PDF)">
+          <i data-lucide="file-text" aria-hidden="true"></i><span class="btn-label">Report (PDF)</span>
+        </a>
       </div>
     </header>
 
@@ -1637,6 +1640,29 @@
             <div class="metric-foot">Last 30 days</div>
           </div>
         </div>
+
+        <section class="card mb-5" style="background:linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%);border:1px solid #bfdbfe">
+          <div class="card-head" style="border-bottom:1px solid #dbeafe">
+            <span class="card-title" style="color:#1d4ed8"><i data-lucide="award"></i> Official Technical &amp; Experimental Results Report</span>
+            <span class="badge badge-ok">Hardware Verified (COM5)</span>
+          </div>
+          <div class="card-body">
+            <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">
+              Comprehensive technical evaluation report documenting RS-380 DC motor physical testing, 95% Confidence Interval RUL prognostics, SHAP explainable AI attribution, and 13/13 functional requirements verification.
+            </p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <a href="/reports/PROJECT_TECHNICAL_REPORT.pdf" target="_blank" class="btn btn-primary btn-sm" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">
+                <i data-lucide="download"></i> Download PDF Report (1.1 MB)
+              </a>
+              <a href="/reports/PROJECT_TECHNICAL_REPORT.docx" target="_blank" class="btn btn-outline btn-sm" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">
+                <i data-lucide="file-text"></i> Download Word Doc (.docx)
+              </a>
+              <a href="/reports/PROJECT_TECHNICAL_REPORT.html" target="_blank" class="btn btn-outline btn-sm" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">
+                <i data-lucide="external-link"></i> View HTML Report
+              </a>
+            </div>
+          </div>
+        </section>
 
         <section class="card">
           <div class="card-head">
