@@ -1815,7 +1815,7 @@
           <div class="metric" style="--m-accent: var(--ok)">
             <div class="metric-label"><i data-lucide="server"></i> API Status</div>
             <div class="metric-value mono" style="font-size:1.4rem;color:var(--ok)">Online</div>
-            <div class="metric-foot">FastAPI v0.104.1</div>
+            <div class="metric-foot">Python SCADA REST Engine</div>
           </div>
           <div class="metric" style="--m-accent: var(--info)">
             <div class="metric-label"><i data-lucide="database"></i> Database</div>
@@ -1825,7 +1825,7 @@
           <div class="metric" style="--m-accent: var(--accent)">
             <div class="metric-label"><i data-lucide="cpu"></i> ML Model</div>
             <div class="metric-value mono" style="font-size:1.4rem">Loaded</div>
-            <div class="metric-foot">Gradient Boost + LSTM</div>
+            <div class="metric-foot">Gradient Boosting + RF CI</div>
           </div>
           <div class="metric" style="--m-accent: var(--hazard)">
             <div class="metric-label"><i data-lucide="hard-drive"></i> Memory</div>
@@ -1840,14 +1840,15 @@
             <div class="card-body">
               <table class="data">
                 <tbody>
-                  <tr><td style="color:var(--faint);width:40%">Motor</td><td style="font-weight:600">RS-380 DC Motor</td></tr>
-                  <tr><td style="color:var(--faint)">Rated Voltage</td><td>7.2 V – 12.0 V</td></tr>
-                  <tr><td style="color:var(--faint)">Rated Current</td><td>3.8 A</td></tr>
-                  <tr><td style="color:var(--faint)">RPM (nominal)</td><td>18,000 rpm</td></tr>
-                  <tr><td style="color:var(--faint)">Torque</td><td>42 mNm</td></tr>
-                  <tr><td style="color:var(--faint)">Vibration Sensor</td><td>Dynamic Accelerometer</td></tr>
-                  <tr><td style="color:var(--faint)">Sample Rate</td><td>10 Hz live / 100 Hz burst</td></tr>
-                  <tr><td style="color:var(--faint)">Temp Sensor</td><td>NTC Thermistor / Contact Probe</td></tr>
+                  <tr><td style="color:var(--faint);width:40%">Motor</td><td style="font-weight:600">RS-380 Brushed DC Motor</td></tr>
+                  <tr><td style="color:var(--faint)">Rated Voltage</td><td>7.2 V – 12.6 V (3S Li-ion)</td></tr>
+                  <tr><td style="color:var(--faint)">Rated Current</td><td>0.35 A no-load / 3.8 A peak</td></tr>
+                  <tr><td style="color:var(--faint)">RPM (operating)</td><td>6,200 – 12,000 RPM</td></tr>
+                  <tr><td style="color:var(--faint)">Motor Driver</td><td>L298N Dual H-Bridge (PWM 5 kHz)</td></tr>
+                  <tr><td style="color:var(--faint)">Current Sensors</td><td>Dual ACS712 Hall-Effect (Motor &amp; Total)</td></tr>
+                  <tr><td style="color:var(--faint)">Vibration Sensor</td><td>Dynamic Accelerometer (ADC Analog)</td></tr>
+                  <tr><td style="color:var(--faint)">Temp Sensor</td><td>DS18B20 1-Wire Digital Probe</td></tr>
+                  <tr><td style="color:var(--faint)">Battery Pack</td><td>3S 18650 Pack (Virtual BMS Protected)</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1858,14 +1859,14 @@
             <div class="card-body">
               <table class="data">
                 <tbody>
-                  <tr><td style="color:var(--faint);width:40%">Backend</td><td>FastAPI + Uvicorn</td></tr>
-                  <tr><td style="color:var(--faint)">ML Framework</td><td>scikit-learn + TensorFlow</td></tr>
-                  <tr><td style="color:var(--faint)">Data Layer</td><td>SQLite via SQLAlchemy</td></tr>
-                  <tr><td style="color:var(--faint)">Frontend</td><td>Vanilla JS + Chart.js 4</td></tr>
-                  <tr><td style="color:var(--faint)">Design System</td><td>SafetyFirst Console CSS</td></tr>
-                  <tr><td style="color:var(--faint)">Dashboard</td><td>Streamlit 1.28 (embed)</td></tr>
-                  <tr><td style="color:var(--faint)">Python</td><td>3.11.x</td></tr>
-                  <tr><td style="color:var(--faint)">License</td><td>MIT</td></tr>
+                  <tr><td style="color:var(--faint);width:40%">Backend</td><td>Python 3.12 HTTP SCADA Server</td></tr>
+                  <tr><td style="color:var(--faint)">ML Framework</td><td>scikit-learn + SHAP + joblib</td></tr>
+                  <tr><td style="color:var(--faint)">Prognostics Models</td><td>GBR (R²=0.819) + RF Ensemble (95% CI)</td></tr>
+                  <tr><td style="color:var(--faint)">Anomaly Detection</td><td>Isolation Forest (F1=0.941)</td></tr>
+                  <tr><td style="color:var(--faint)">Data Historian</td><td>SQLite (equipment_health.db @ 1 Hz)</td></tr>
+                  <tr><td style="color:var(--faint)">Transport Protocols</td><td>USB Serial (115200) + Wi-Fi UDP (8888)</td></tr>
+                  <tr><td style="color:var(--faint)">Frontend</td><td>Vanilla JS + Chart.js 4 + Lucide</td></tr>
+                  <tr><td style="color:var(--faint)">AI Copilot</td><td>RAG Knowledge Base (ISO 13374 SOPs)</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1876,14 +1877,15 @@
           <div class="card-head"><span class="card-title"><i data-lucide="network"></i> Architecture</span></div>
           <div class="card-body">
             <p style="font-size:.84rem;color:var(--muted);line-height:1.7">
-              The RS-380 Motor Prognostics system acquires vibration acceleration, temperature,
-              and current telemetry from a physical motor rig. A Python SCADA service ingests readings into
-              SQLite, then feeds a Gradient Boosting + LSTM ensemble that outputs a continuous
-              <strong>Health Index</strong> (0–100) and <strong>Remaining Useful Life</strong>
-              estimate with 90% confidence bounds. SHAP attribution identifies the dominant
-              degradation mode per reading. Alerts fire when health drops below configurable
-              thresholds. This dashboard is served directly by Python's HTTP server and optionally
-              embedded in Streamlit.
+              The RS-380 Motor Prognostics system acquires dynamic vibration, casing temperature,
+              armature current, total bus current, and 3S battery cell voltages from a physical hardware testbed.
+              The dual-core ESP32 streams telemetry concurrently over high-speed USB Serial (115,200 baud) and
+              low-latency wireless Wi-Fi UDP (port 8888). A Python SCADA service ingests readings at 5–10 Hz into
+              SQLite, continuously executing a trained Gradient Boosting + Random Forest ensemble that predicts
+              the <strong>Health Index</strong> (0.0–1.0) and <strong>Remaining Useful Life (RUL)</strong>
+              with rigorous 95% Confidence Interval uncertainty bounds. Real-time SHAP TreeExplainer game-theory
+              attribution isolates dominant degradation modes per reading, while a Virtual Software BMS enforces
+              instant under-voltage cutoff protection.
             </p>
           </div>
         </section>
@@ -2328,7 +2330,7 @@ function updateKPIs(r) {
     opH.textContent = (142.8 + elapsedRunH).toFixed(1) + ' h';
   }
 
-  // DC Power Distribution & 4S Battery Pack Telemetry
+  // DC Power Distribution & 3S Battery Pack Telemetry
   const pTotCurr = document.getElementById('pwrTotCurr');
   if (pTotCurr) pTotCurr.textContent = fmt(r.vals.totalCurrent, 3) + ' A';
   const pMotCurr = document.getElementById('pwrMotCurr');
