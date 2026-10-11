@@ -2389,7 +2389,9 @@ function updateTrajectory(r) {
   if (trajData.labels.length > MAX_TRAJ) {
     trajData.labels.shift(); trajData.health.shift(); trajData.rul_norm.shift();
   }
-  trajChart.update();
+  if (currentPage === 'overview') {
+    trajChart.update('none');
+  }
 }
 
 // Oscilloscope rolling buffer
@@ -2412,12 +2414,14 @@ function updateOsc(r) {
   const elWkurt = document.getElementById('wKurt');
   if (elWkurt) elWkurt.textContent = fmt(r.kurtosis, 2) + ' β₂';
 
-  // Only update if charts have been initialized (waveforms tab visited)
-  if (oscX) { oscX.data.datasets[0].data = [...oscBufs.vibX]; oscX.update(); }
-  if (oscY) { oscY.data.datasets[0].data = [...oscBufs.vibY]; oscY.update(); }
-  if (oscZ) { oscZ.data.datasets[0].data = [...oscBufs.vibZ]; oscZ.update(); }
-  if (oscTemp) { oscTemp.data.datasets[0].data = [...oscBufs.temp]; oscTemp.update(); }
-  if (oscCurr) { oscCurr.data.datasets[0].data = [...oscBufs.current]; oscCurr.update(); }
+  // Only update charts if currently viewing the waveforms tab (eliminates background CPU lag)
+  if (currentPage === 'waveforms') {
+    if (oscX) { oscX.data.datasets[0].data = [...oscBufs.vibX]; oscX.update('none'); }
+    if (oscY) { oscY.data.datasets[0].data = [...oscBufs.vibY]; oscY.update('none'); }
+    if (oscZ) { oscZ.data.datasets[0].data = [...oscBufs.vibZ]; oscZ.update('none'); }
+    if (oscTemp) { oscTemp.data.datasets[0].data = [...oscBufs.temp]; oscTemp.update('none'); }
+    if (oscCurr) { oscCurr.data.datasets[0].data = [...oscBufs.current]; oscCurr.update('none'); }
+  }
 }
 
 // Telemetry log table — clean capped feed of latest 10 snapshots
@@ -3778,7 +3782,8 @@ window.getLiveTelemetry = function() {
   };
 };
 
-setInterval(tick, 80);
+// Match hardware 5 Hz streaming rate (180ms eliminates HTTP congestion & browser lag)
+setInterval(tick, 180);
 
 // Initial prognostics range group
 document.getElementById('progRangeGroup').addEventListener('click', e => {
