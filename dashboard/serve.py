@@ -253,7 +253,7 @@ class HardwareSerialBridge:
                             self.last_wireless_packet_time = now
                             self.wireless_packets_received += 1
                             if self.wireless_packets_received == 1:
-                                threading.Thread(target=lambda: (time.sleep(0.3), self.send_command("CAL_TRIM_IMOT=1.0000")), daemon=True).start()
+                                threading.Thread(target=lambda: (time.sleep(0.3), self.send_command("CAL_TRIM_IMOT=0.0900")), daemon=True).start()
                             # If serial has not received a packet recently, wireless takes over
                             if (now - self.last_packet_time > 1.2) or self.transport == "WIRELESS_WIFI":
                                 self.transport = "WIRELESS_WIFI"
@@ -308,7 +308,7 @@ class HardwareSerialBridge:
                 self.connected = True
                 self.transport = "USB_SERIAL"
                 print(f"[SERIAL] Connected to ESP32 on {target_port} @ {self.baudrate} baud")
-                threading.Thread(target=lambda: (time.sleep(0.5), self.send_command("CAL_TRIM_IMOT=1.0000")), daemon=True).start()
+                threading.Thread(target=lambda: (time.sleep(0.5), self.send_command("CAL_TRIM_IMOT=0.0900")), daemon=True).start()
 
                 while self.running and self.ser and self.ser.is_open:
                     raw_line = self.ser.readline()

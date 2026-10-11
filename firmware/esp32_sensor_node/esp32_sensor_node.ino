@@ -84,7 +84,7 @@ float acs_sensitivity            = 0.100;      // Volts per Ampere (20A module d
 const float ACS_DIVIDER_FACTOR   = 0.456;      // Measured output divider ratio
 float zero_curr_motor_volt       = 1.139;      // Zero-current quiescent voltage
 float zero_curr_total_volt       = 1.137;      // Zero-current quiescent voltage
-float cal_curr_motor_mult        = 1.000;      // Calibrated multiplier for RS-380 motor current sensor (1.000 default)
+float cal_curr_motor_mult        = 0.090;      // Calibrated multiplier for RS-380 L298N PWM drive (0.35A - 0.50A no-load)
 float cal_curr_total_mult        = 1.000;      // Fine-calibration trim multiplier
 bool  enable_slew_rate           = true;       // Slew-rate soft-start ramp toggle
 float last_raw_adc_m             = 0.000;      // Last sampled raw ADC voltage on GPIO 36
@@ -157,37 +157,37 @@ void IRAM_ATTR isr_encoder_clk() {
   if (now - last_scada_cmd_time < 1200) return;
 
   static unsigned long last_clk_time = 0;
-  if (now - last_clk_time > 10) { // 10ms crisp physical rotation filter (captures fast human turns)
-    int clk = digitalRead(PIN_ENC_CLK);
-    int dt  = digitalRead(PIN_ENC_DT);
-    if (clk != dt) {
-      // Clockwise (increase speed)
-      if (encoder_position == 0) {
-        encoder_position = 150; // Jump to min operational PWM for RS-380 starting torque
-      } else if (encoder_position <= 245) {
-        encoder_position += 10;
-      } else {
-        encoder_position = 255;
-      }
+  if (now - last_clk_time < 20) return; // 20ms clean mechanical filter
+
+  int dt = digitalRead(PIN_ENC_DT);
+  if (dt == HIGH) {
+    // Clockwise (increase speed)
+    if (!motor_running || encoder_position == 0) {
+      encoder_position = 160; // Reliable starting speed for RS-380
       motor_running = true;
-      safety_tripped = false;
+    } else if (encoder_position <= 245) {
+      encoder_position += 10;
     } else {
-      // Counter-clockwise (decrease speed)
-      if (encoder_position > 150) {
-        encoder_position -= 10;
-      } else {
-        encoder_position = 0; // Stop motor cleanly when dialed below min threshold
-        motor_running = false;
-      }
+      encoder_position = 255;
     }
-    last_clk_time = now;
+    safety_tripped = false;
+    safety_trip_reason = "NONE";
+  } else {
+    // Counter-clockwise (decrease speed)
+    if (encoder_position > 150) {
+      encoder_position -= 10;
+    } else {
+      encoder_position = 0; // Stop cleanly below 150
+      motor_running = false;
+    }
   }
+  last_clk_time = now;
 }
 
 void IRAM_ATTR isr_encoder_btn() {
   static unsigned long last_btn_press = 0;
   unsigned long now = millis();
-  if (now - last_btn_press > 180) { // 180ms responsive human button filter
+  if (now - last_btn_press > 350) { // 350ms solid debounce prevents double-toggle on release
     encoder_btn_pressed = true;
     last_btn_press = now;
   }
@@ -446,12 +446,12 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
                          float cell1, float cell2, float cell3, float v_pack) {
   if (safety_tripped) return;
 
-  // 1. Virtual Software BMS: Low-Voltage Cutoff with 300ms persistence check
+  // 1. Virtual Software BMS: Low-Voltage Cutoff with 1200ms persistence check
   static unsigned long uv_trip_start = 0;
   if (!bms_override_demo && motor_running) {
     if (cell1 < BMS_MIN_CELL_VOLT || cell2 < BMS_MIN_CELL_VOLT || cell3 < BMS_MIN_CELL_VOLT || v_pack < BMS_MIN_PACK_VOLT) {
       if (uv_trip_start == 0) uv_trip_start = millis();
-      else if (millis() - uv_trip_start > 300) {
+      else if (millis() - uv_trip_start > 1200) {
         safety_tripped = true;
         safety_trip_reason = "BMS_UNDERVOLT_TRIP";
       }
@@ -469,11 +469,11 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
     safety_trip_reason = "NONE";
   }
 
-  // 3. Overcurrent trip with 400ms duration persistence
+  // 3. Overcurrent trip with 1200ms duration persistence (allows motor inrush without false trip)
   static unsigned long oc_start_time = 0;
   if (i_total > 4.50 || (i_motor > 4.50 && i_total > 2.20)) {
     if (oc_start_time == 0) oc_start_time = millis();
-    else if (millis() - oc_start_time > 400) {
+    else if (millis() - oc_start_time > 1200) {
       safety_tripped = true;
       safety_trip_reason = "OVERCURRENT_TRIP";
     }
@@ -481,10 +481,10 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
     oc_start_time = 0;
   }
 
-  // 4. L298N Thermal & Current Soft-Clamp Protection
-  if (motor_running && i_total > 2.00 && encoder_position > 150) {
+  // 4. L298N Thermal & Current Soft-Clamp Protection (trips only under continuous heavy overload)
+  if (motor_running && i_total > 3.80 && encoder_position > 150) {
     static unsigned long last_thermal_trim = 0;
-    if (millis() - last_thermal_trim > 250) {
+    if (millis() - last_thermal_trim > 500) {
       encoder_position = max(150, encoder_position - 5);
       last_thermal_trim = millis();
     }
@@ -809,7 +809,7 @@ void setup() {
   pinMode(PIN_ENC_CLK, INPUT_PULLUP);
   pinMode(PIN_ENC_DT, INPUT_PULLUP);
   pinMode(PIN_ENC_SW, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(PIN_ENC_CLK), isr_encoder_clk, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PIN_ENC_CLK), isr_encoder_clk, FALLING);
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_SW), isr_encoder_btn, FALLING);
 
   // Initialize Temperature Sensor (Asynchronous non-blocking)
