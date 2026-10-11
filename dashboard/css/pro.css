@@ -635,7 +635,16 @@ svg.lucide {
   background: var(--ok);
   animation: livePulse 1.8s ease-in-out infinite !important;
 }
-.live-pill.is-off { color: var(--muted); }
+.live-pill.is-off {
+  color: var(--muted) !important;
+  border-color: var(--border) !important;
+  background: var(--surface-alt) !important;
+}
+.live-pill.is-off .live-dot {
+  background: var(--muted) !important;
+  animation: none !important;
+  box-shadow: none !important;
+}
 
 @keyframes livePulse {
   0%,100% { box-shadow: 0 0 0 0 rgba(47,107,70,.5); }

@@ -9,7 +9,7 @@ This file records key decisions, assumptions, and context for the industrial equ
   - Motor voltage (voltage divider)
   - Total system current (ACS715‑20A module)
   - Motor current (second ACS715‑20A module)
-  - Temperature (DS18B20 or thermistor)
+  - Temperature (DS18B20 1-Wire Digital Probe)
   - Vibration (801S analog module)
   - Optional RPM (Hall‑effect or optical encoder)
 - **Communication**: ESP32 publishes JSON via Wi‑Fi (MQTT or HTTP POST).
