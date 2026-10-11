@@ -252,6 +252,8 @@ class HardwareSerialBridge:
                             self.wireless_ip = addr[0]
                             self.last_wireless_packet_time = now
                             self.wireless_packets_received += 1
+                            if self.wireless_packets_received == 1:
+                                threading.Thread(target=lambda: (time.sleep(0.3), self.send_command("CAL_TRIM_IMOT=1.0000")), daemon=True).start()
                             # If serial has not received a packet recently, wireless takes over
                             if (now - self.last_packet_time > 1.2) or self.transport == "WIRELESS_WIFI":
                                 self.transport = "WIRELESS_WIFI"
@@ -306,6 +308,7 @@ class HardwareSerialBridge:
                 self.connected = True
                 self.transport = "USB_SERIAL"
                 print(f"[SERIAL] Connected to ESP32 on {target_port} @ {self.baudrate} baud")
+                threading.Thread(target=lambda: (time.sleep(0.5), self.send_command("CAL_TRIM_IMOT=1.0000")), daemon=True).start()
 
                 while self.running and self.ser and self.ser.is_open:
                     raw_line = self.ser.readline()
@@ -555,9 +558,19 @@ class SCADAHandler(SimpleHTTPRequestHandler):
         if clean_path == "/api/history":
             if db_manager is not None:
                 try:
-                    limit = 60
+                    limit = 100
+                    if "?" in self.path:
+                        import urllib.parse
+                        params = urllib.parse.parse_qs(self.path.split("?", 1)[1])
+                        if "limit" in params:
+                            try:
+                                limit = min(500, max(1, int(params["limit"][0])))
+                            except ValueError:
+                                pass
                     with db_manager.get_connection() as conn:
                         cursor = conn.cursor()
+                        cursor.execute("SELECT COUNT(*) FROM raw_sensor_data")
+                        total_count = cursor.fetchone()[0]
                         cursor.execute("""
                             SELECT r.timestamp, r.device_id, r.battery_voltage, r.motor_voltage,
                                    r.total_current, r.motor_current, r.temperature, r.vibration,
@@ -568,7 +581,7 @@ class SCADAHandler(SimpleHTTPRequestHandler):
                             ORDER BY r.id DESC LIMIT ?
                         """, (limit,))
                         rows = [dict(row) for row in cursor.fetchall()]
-                    self._send_json(200, {"success": True, "count": len(rows), "data": rows})
+                    self._send_json(200, {"success": True, "count": len(rows), "total_count": total_count, "data": rows})
                     return
                 except Exception as e:
                     self._send_json(500, {"success": False, "error": str(e)})

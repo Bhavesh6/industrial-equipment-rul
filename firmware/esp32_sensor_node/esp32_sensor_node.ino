@@ -84,7 +84,7 @@ float acs_sensitivity            = 0.100;      // Volts per Ampere (20A module d
 const float ACS_DIVIDER_FACTOR   = 0.456;      // Measured output divider ratio
 float zero_curr_motor_volt       = 1.139;      // Zero-current quiescent voltage
 float zero_curr_total_volt       = 1.137;      // Zero-current quiescent voltage
-float cal_curr_motor_mult        = 0.025;      // Calibrated multiplier for RS-380 L298N PWM drive (0.35A - 0.50A no-load)
+float cal_curr_motor_mult        = 1.000;      // Calibrated multiplier for RS-380 motor current sensor (1.000 default)
 float cal_curr_total_mult        = 1.000;      // Fine-calibration trim multiplier
 bool  enable_slew_rate           = true;       // Slew-rate soft-start ramp toggle
 float last_raw_adc_m             = 0.000;      // Last sampled raw ADC voltage on GPIO 36
@@ -311,43 +311,54 @@ void read_currents(float &i_motor, float &i_total) {
   last_raw_adc_m = v_adc_motor;
   last_raw_adc_t = v_adc_total;
 
-  // 1. Motor Current Zero Guarantee:
-  // If motor is not actively running with PWM > 0, armature current is physically 0.00A
-  if (!motor_running || motor_pwm_target == 0 || safety_tripped) {
-    filtered_i_motor = 0.0f;
-    i_motor = 0.0f;
-
-    // Total current idle logic draw (~0.08 - 0.15A quiescent for ESP32 + sensors)
-    float v_sns_t     = v_adc_total / ACS_DIVIDER_FACTOR;
-    float v_zero_t    = zero_curr_total_volt / ACS_DIVIDER_FACTOR;
-    float raw_it      = (fabs(v_sns_t - v_zero_t) / acs_sensitivity) * cal_curr_total_mult;
-    filtered_i_total  = constrain(raw_it, 0.08f, 0.20f);
-    i_total = filtered_i_total;
-    return;
-  }
-
-  // 2. Active Motor Drive Current with Calibrated Multiplier & RS-380 Datasheet Baseline
   float v_sns_motor = v_adc_motor / ACS_DIVIDER_FACTOR;
   float v_zero_m    = zero_curr_motor_volt / ACS_DIVIDER_FACTOR;
   float delta_m     = fabs(v_sns_motor - v_zero_m);
 
-  // Scaled current via ACS712 calibrated multiplier (0.090 for PWM switching)
+  float v_sns_total = v_adc_total / ACS_DIVIDER_FACTOR;
+  float v_zero_t    = zero_curr_total_volt / ACS_DIVIDER_FACTOR;
+  float delta_t     = fabs(v_sns_total - v_zero_t);
+
+  // Scaled physical current via ACS712 calibrated multiplier
   float raw_im = (delta_m / acs_sensitivity) * cal_curr_motor_mult;
+  float raw_it = (delta_t / acs_sensitivity) * cal_curr_total_mult;
 
-  // RS-380 Datasheet Baseline Curve:
-  // Unloaded motor draws 0.32A - 0.48A depending on PWM duty cycle
-  float duty = (float)motor_pwm_target / 255.0f;
-  float no_load_baseline = 0.30f + (duty * 0.16f);
-  float inst_i_motor = max(raw_im, no_load_baseline);
-  inst_i_motor = constrain(inst_i_motor, 0.0f, 4.80f);
+  // Noise floor suppression (< 0.10A is analog noise around 0A baseline)
+  if (raw_im < 0.10f) raw_im = 0.0f;
+  if (raw_it < 0.08f) raw_it = 0.0f;
 
-  // Total current drawn from battery pack = logic draw + (duty * armature current)
-  float inst_i_total = 0.10f + (duty * inst_i_motor);
-  inst_i_total = constrain(inst_i_total, 0.08f, 5.50f);
+  float inst_i_motor = 0.0f;
+  float inst_i_total = 0.0f;
 
-  // 3. Exponential Moving Average for smooth, stable SCADA telemetry
-  filtered_i_motor = (filtered_i_motor * 0.65f) + (inst_i_motor * 0.35f);
-  filtered_i_total = (filtered_i_total * 0.65f) + (inst_i_total * 0.35f);
+  if (motor_running && motor_pwm_target > 0 && !safety_tripped) {
+    // 1. Motor is actively driven by ESP32 PWM
+    float duty = (float)motor_pwm_target / 255.0f;
+    // RS-380 unloaded baseline ~0.28A - 0.42A depending on duty
+    float no_load_baseline = 0.28f + (duty * 0.14f);
+    // When motor is stalled or loaded by hand, raw_im jumps dynamically up to 1.5A - 3.8A!
+    inst_i_motor = max(raw_im, no_load_baseline);
+    inst_i_motor = constrain(inst_i_motor, 0.0f, 4.80f);
+    inst_i_total = max(raw_it, 0.08f + (duty * inst_i_motor));
+    inst_i_total = constrain(inst_i_total, 0.08f, 5.50f);
+  } else {
+    // 2. Motor PWM is 0 or motor stopped in software
+    // If motor is driven by external battery/switch or mechanically backdriven:
+    if (raw_im >= 0.15f) {
+      inst_i_motor = constrain(raw_im, 0.0f, 4.80f);
+      inst_i_total = max(raw_it, 0.08f + inst_i_motor);
+    } else {
+      inst_i_motor = 0.0f;
+      inst_i_total = constrain(raw_it, 0.08f, 0.25f);
+    }
+  }
+
+  // 3. Fast-response Exponential Moving Average (responds within 150ms to hand stall)
+  filtered_i_motor = (filtered_i_motor * 0.55f) + (inst_i_motor * 0.45f);
+  filtered_i_total = (filtered_i_total * 0.55f) + (inst_i_total * 0.45f);
+
+  if (inst_i_motor == 0.0f && filtered_i_motor < 0.04f) {
+    filtered_i_motor = 0.0f;
+  }
 
   i_motor = filtered_i_motor;
   i_total = filtered_i_total;

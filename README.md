@@ -156,41 +156,6 @@ Open **[http://localhost:8000](http://localhost:8000)** in Google Chrome, Micros
 
 ---
 
-## 🌐 Public Live Demonstration (Zero Setup Required)
-
-If you need to show the complete working project to evaluators, clients, or stakeholders **without them touching code or installing anything**, you can share the active Cloudflare Tunnel URL:
-
-🔗 **Live SCADA Web Dashboard**: `https://pine-impose-turning-alexandria.trycloudflare.com`
-
-- Real-time live sensor feeds and telemetry streaming.
-- Real-time RUL countdown and health index gauge.
-- Full 3S battery pack cell monitoring (Cell 1, 2, 3) and Virtual BMS status.
-- Interactive AI Maintenance Copilot.
-- One-click exportable PDF & DOCX Technical Audit Reports.
-
----
-
-## 🔒 Intellectual Property, Security & Repository Privacy Notice
-
-### How to Protect Your Code on GitHub:
-1. **GitHub Repository Visibility**:
-   - If your GitHub repository is currently **Public**, anyone with the link can clone and copy all source code, models, and data.
-   - **To make it Private immediately**:
-     1. Go to your repository on GitHub.
-     2. Click **Settings** (top right tab).
-     3. Scroll down to the bottom **Danger Zone**.
-     4. Click **Change repository visibility** &rarr; Select **Make private**.
-     5. Type your repository name to confirm.
-   - *Once private, only you (and people you explicitly invite as Collaborators) can see, clone, or download the repository.*
-
-2. **Demonstrating Without Giving Code**:
-   - Use the **Live Cloudflare link** above to demonstrate the full application. Evaluators can test and verify all functionality live in their browser while your code and models remain 100% secure on your computer.
-
-3. **Packaging as Standalone Binary (`.exe`)**:
-   - If an evaluator needs to run the project offline on their laptop without viewing the raw Python source code, the server can be bundled into a compiled executable using `pyinstaller --onefile dashboard/serve.py`.
-
----
-
 ## 📂 Project Directory Structure
 
 ```
@@ -234,11 +199,3 @@ industrial-equipment-rul/
         ├── predict.py            # Real-time inference engine
         └── train.py              # GroupKFold leakage-free model training
 ```
-
----
-
-## ⚖️ Legal Notice & Copyright
-
-**Copyright &copy; 2026 Bhavesh & Authors. All Rights Reserved.**
-
-This software, its machine learning architectures, firmware algorithms, and datasets constitute proprietary intellectual property. Unauthorized copying, distribution, decompilation, public re-hosting, or uncredited academic submission of this codebase without express written authorization is strictly prohibited.
