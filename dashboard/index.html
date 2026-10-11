@@ -457,7 +457,7 @@
           <div class="metric" style="--m-accent: var(--info)">
             <div class="metric-label"><i data-lucide="history"></i> Est. RUL</div>
             <div class="metric-value mono" id="mRul">—</div>
-            <div class="metric-foot" id="mRulFoot">hours to threshold</div>
+            <div class="metric-foot" id="mRulFoot">Remaining Useful Life</div>
           </div>
           <div class="metric" style="--m-accent: var(--accent)">
             <div class="metric-label"><i data-lucide="trending-up"></i> RMS Deviation</div>
@@ -1444,7 +1444,7 @@
           <div class="metric" style="--m-accent: var(--info)">
             <div class="metric-label"><i data-lucide="clock"></i> Est. RUL</div>
             <div class="metric-value mono" id="pRul">—</div>
-            <div class="metric-foot">hours to maintenance</div>
+            <div class="metric-foot">Remaining Useful Life</div>
           </div>
           <div class="metric" style="--m-accent: var(--accent)">
             <div class="metric-label"><i data-lucide="flame"></i> Degradation Rate</div>
@@ -2262,7 +2262,7 @@ function updateKPIs(r) {
   document.getElementById('mTopContrib').textContent = fmt(topVal, 3) + ' g';
   
   document.getElementById('mHealthFoot').textContent = 'Healthy — low degradation';
-  document.getElementById('mRulFoot').textContent = 'hours to maintenance';
+  document.getElementById('mRulFoot').textContent = 'Remaining Useful Life';
   const rmsEl = document.getElementById('mRmsFoot');
   if (rmsEl) rmsEl.textContent = 'vibration delta baseline';
   document.getElementById('mTopContribFoot').textContent = `primary driver: ${topAxis}`;
