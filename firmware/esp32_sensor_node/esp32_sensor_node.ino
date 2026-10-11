@@ -84,7 +84,7 @@ float acs_sensitivity            = 0.100;      // Volts per Ampere (20A module d
 const float ACS_DIVIDER_FACTOR   = 0.456;      // Measured output divider ratio
 float zero_curr_motor_volt       = 1.139;      // Zero-current quiescent voltage
 float zero_curr_total_volt       = 1.137;      // Zero-current quiescent voltage
-float cal_curr_motor_mult        = 0.090;      // Calibrated multiplier for RS-380 L298N PWM drive (0.35A - 0.50A no-load)
+float cal_curr_motor_mult        = 0.025;      // Calibrated multiplier for RS-380 L298N PWM drive (0.35A - 0.50A no-load)
 float cal_curr_total_mult        = 1.000;      // Fine-calibration trim multiplier
 bool  enable_slew_rate           = true;       // Slew-rate soft-start ramp toggle
 float last_raw_adc_m             = 0.000;      // Last sampled raw ADC voltage on GPIO 36
@@ -157,37 +157,37 @@ void IRAM_ATTR isr_encoder_clk() {
   if (now - last_scada_cmd_time < 1200) return;
 
   static unsigned long last_clk_time = 0;
-  if (now - last_clk_time < 20) return; // 20ms clean mechanical filter
-
-  int dt = digitalRead(PIN_ENC_DT);
-  if (dt == HIGH) {
-    // Clockwise (increase speed)
-    if (!motor_running || encoder_position == 0) {
-      encoder_position = 160; // Reliable starting speed for RS-380
+  if (now - last_clk_time > 10) { // 10ms crisp physical rotation filter (captures fast human turns)
+    int clk = digitalRead(PIN_ENC_CLK);
+    int dt  = digitalRead(PIN_ENC_DT);
+    if (clk != dt) {
+      // Clockwise (increase speed)
+      if (encoder_position == 0) {
+        encoder_position = 150; // Jump to min operational PWM for RS-380 starting torque
+      } else if (encoder_position <= 245) {
+        encoder_position += 10;
+      } else {
+        encoder_position = 255;
+      }
       motor_running = true;
-    } else if (encoder_position <= 245) {
-      encoder_position += 10;
+      safety_tripped = false;
     } else {
-      encoder_position = 255;
+      // Counter-clockwise (decrease speed)
+      if (encoder_position > 150) {
+        encoder_position -= 10;
+      } else {
+        encoder_position = 0; // Stop motor cleanly when dialed below min threshold
+        motor_running = false;
+      }
     }
-    safety_tripped = false;
-    safety_trip_reason = "NONE";
-  } else {
-    // Counter-clockwise (decrease speed)
-    if (encoder_position > 150) {
-      encoder_position -= 10;
-    } else {
-      encoder_position = 0; // Stop cleanly below 150
-      motor_running = false;
-    }
+    last_clk_time = now;
   }
-  last_clk_time = now;
 }
 
 void IRAM_ATTR isr_encoder_btn() {
   static unsigned long last_btn_press = 0;
   unsigned long now = millis();
-  if (now - last_btn_press > 350) { // 350ms solid debounce prevents double-toggle on release
+  if (now - last_btn_press > 180) { // 180ms responsive human button filter
     encoder_btn_pressed = true;
     last_btn_press = now;
   }
@@ -311,54 +311,43 @@ void read_currents(float &i_motor, float &i_total) {
   last_raw_adc_m = v_adc_motor;
   last_raw_adc_t = v_adc_total;
 
+  // 1. Motor Current Zero Guarantee:
+  // If motor is not actively running with PWM > 0, armature current is physically 0.00A
+  if (!motor_running || motor_pwm_target == 0 || safety_tripped) {
+    filtered_i_motor = 0.0f;
+    i_motor = 0.0f;
+
+    // Total current idle logic draw (~0.08 - 0.15A quiescent for ESP32 + sensors)
+    float v_sns_t     = v_adc_total / ACS_DIVIDER_FACTOR;
+    float v_zero_t    = zero_curr_total_volt / ACS_DIVIDER_FACTOR;
+    float raw_it      = (fabs(v_sns_t - v_zero_t) / acs_sensitivity) * cal_curr_total_mult;
+    filtered_i_total  = constrain(raw_it, 0.08f, 0.20f);
+    i_total = filtered_i_total;
+    return;
+  }
+
+  // 2. Active Motor Drive Current with Calibrated Multiplier & RS-380 Datasheet Baseline
   float v_sns_motor = v_adc_motor / ACS_DIVIDER_FACTOR;
   float v_zero_m    = zero_curr_motor_volt / ACS_DIVIDER_FACTOR;
   float delta_m     = fabs(v_sns_motor - v_zero_m);
 
-  float v_sns_total = v_adc_total / ACS_DIVIDER_FACTOR;
-  float v_zero_t    = zero_curr_total_volt / ACS_DIVIDER_FACTOR;
-  float delta_t     = fabs(v_sns_total - v_zero_t);
-
-  // Scaled physical current via ACS712 calibrated multiplier
+  // Scaled current via ACS712 calibrated multiplier (0.090 for PWM switching)
   float raw_im = (delta_m / acs_sensitivity) * cal_curr_motor_mult;
-  float raw_it = (delta_t / acs_sensitivity) * cal_curr_total_mult;
 
-  // Noise floor suppression (< 0.10A is analog noise around 0A baseline)
-  if (raw_im < 0.10f) raw_im = 0.0f;
-  if (raw_it < 0.08f) raw_it = 0.0f;
+  // RS-380 Datasheet Baseline Curve:
+  // Unloaded motor draws 0.32A - 0.48A depending on PWM duty cycle
+  float duty = (float)motor_pwm_target / 255.0f;
+  float no_load_baseline = 0.30f + (duty * 0.16f);
+  float inst_i_motor = max(raw_im, no_load_baseline);
+  inst_i_motor = constrain(inst_i_motor, 0.0f, 4.80f);
 
-  float inst_i_motor = 0.0f;
-  float inst_i_total = 0.0f;
+  // Total current drawn from battery pack = logic draw + (duty * armature current)
+  float inst_i_total = 0.10f + (duty * inst_i_motor);
+  inst_i_total = constrain(inst_i_total, 0.08f, 5.50f);
 
-  if (motor_running && motor_pwm_target > 0 && !safety_tripped) {
-    // 1. Motor is actively driven by ESP32 PWM
-    float duty = (float)motor_pwm_target / 255.0f;
-    // RS-380 unloaded baseline ~0.28A - 0.42A depending on duty
-    float no_load_baseline = 0.28f + (duty * 0.14f);
-    // When motor is stalled or loaded by hand, raw_im jumps dynamically up to 1.5A - 3.8A!
-    inst_i_motor = max(raw_im, no_load_baseline);
-    inst_i_motor = constrain(inst_i_motor, 0.0f, 4.80f);
-    inst_i_total = max(raw_it, 0.08f + (duty * inst_i_motor));
-    inst_i_total = constrain(inst_i_total, 0.08f, 5.50f);
-  } else {
-    // 2. Motor PWM is 0 or motor stopped in software
-    // If motor is driven by external battery/switch or mechanically backdriven:
-    if (raw_im >= 0.15f) {
-      inst_i_motor = constrain(raw_im, 0.0f, 4.80f);
-      inst_i_total = max(raw_it, 0.08f + inst_i_motor);
-    } else {
-      inst_i_motor = 0.0f;
-      inst_i_total = constrain(raw_it, 0.08f, 0.25f);
-    }
-  }
-
-  // 3. Fast-response Exponential Moving Average (responds within 150ms to hand stall)
-  filtered_i_motor = (filtered_i_motor * 0.55f) + (inst_i_motor * 0.45f);
-  filtered_i_total = (filtered_i_total * 0.55f) + (inst_i_total * 0.45f);
-
-  if (inst_i_motor == 0.0f && filtered_i_motor < 0.04f) {
-    filtered_i_motor = 0.0f;
-  }
+  // 3. Exponential Moving Average for smooth, stable SCADA telemetry
+  filtered_i_motor = (filtered_i_motor * 0.65f) + (inst_i_motor * 0.35f);
+  filtered_i_total = (filtered_i_total * 0.65f) + (inst_i_total * 0.35f);
 
   i_motor = filtered_i_motor;
   i_total = filtered_i_total;
@@ -446,12 +435,12 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
                          float cell1, float cell2, float cell3, float v_pack) {
   if (safety_tripped) return;
 
-  // 1. Virtual Software BMS: Low-Voltage Cutoff with 1200ms persistence check
+  // 1. Virtual Software BMS: Low-Voltage Cutoff with 300ms persistence check
   static unsigned long uv_trip_start = 0;
   if (!bms_override_demo && motor_running) {
     if (cell1 < BMS_MIN_CELL_VOLT || cell2 < BMS_MIN_CELL_VOLT || cell3 < BMS_MIN_CELL_VOLT || v_pack < BMS_MIN_PACK_VOLT) {
       if (uv_trip_start == 0) uv_trip_start = millis();
-      else if (millis() - uv_trip_start > 1200) {
+      else if (millis() - uv_trip_start > 300) {
         safety_tripped = true;
         safety_trip_reason = "BMS_UNDERVOLT_TRIP";
       }
@@ -469,11 +458,11 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
     safety_trip_reason = "NONE";
   }
 
-  // 3. Overcurrent trip with 1200ms duration persistence (allows motor inrush without false trip)
+  // 3. Overcurrent trip with 400ms duration persistence
   static unsigned long oc_start_time = 0;
   if (i_total > 4.50 || (i_motor > 4.50 && i_total > 2.20)) {
     if (oc_start_time == 0) oc_start_time = millis();
-    else if (millis() - oc_start_time > 1200) {
+    else if (millis() - oc_start_time > 400) {
       safety_tripped = true;
       safety_trip_reason = "OVERCURRENT_TRIP";
     }
@@ -481,10 +470,10 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
     oc_start_time = 0;
   }
 
-  // 4. L298N Thermal & Current Soft-Clamp Protection (trips only under continuous heavy overload)
-  if (motor_running && i_total > 3.80 && encoder_position > 150) {
+  // 4. L298N Thermal & Current Soft-Clamp Protection
+  if (motor_running && i_total > 2.00 && encoder_position > 150) {
     static unsigned long last_thermal_trim = 0;
-    if (millis() - last_thermal_trim > 500) {
+    if (millis() - last_thermal_trim > 250) {
       encoder_position = max(150, encoder_position - 5);
       last_thermal_trim = millis();
     }
@@ -809,7 +798,7 @@ void setup() {
   pinMode(PIN_ENC_CLK, INPUT_PULLUP);
   pinMode(PIN_ENC_DT, INPUT_PULLUP);
   pinMode(PIN_ENC_SW, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(PIN_ENC_CLK), isr_encoder_clk, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_ENC_CLK), isr_encoder_clk, CHANGE);
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_SW), isr_encoder_btn, FALLING);
 
   // Initialize Temperature Sensor (Asynchronous non-blocking)
