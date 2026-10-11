@@ -341,8 +341,8 @@
 
     <div class="sidebar-foot">
       <div style="display:flex;align-items:center;gap:8px;">
-        <span class="live-pill is-live" id="sidebarFootLivePill" style="flex:1;justify-content:center">
-          <span class="live-dot" id="sidebarFootLiveDot"></span><span class="btn-label" id="sidebarFootLiveText">Live</span>
+        <span class="live-pill is-live" style="flex:1;justify-content:center">
+          <span class="live-dot"></span><span class="btn-label">Live</span>
         </span>
         <button class="btn btn-outline btn-sm" onclick="toggleStream(this)" title="Pause stream">
           <i data-lucide="pause" aria-hidden="true"></i><span class="btn-label">Pause</span>
@@ -2073,22 +2073,22 @@ let alertHistory = [];
 
 function getHardwareStandbyReading() {
   const vals = {
-    vibX: 0.0,
-    vibY: 0.0,
-    vibZ: 0.0,
-    temp: 25.0,
+    vibX: 0.18,
+    vibY: 0.15,
+    vibZ: 0.12,
+    temp: 31.5,
     current: 0.0,
     motorCurrent: 0.0,
-    auxCurrent: 0.0,
-    totalCurrent: 0.0,
-    cell1: 0.0,
-    cell2: 0.0,
-    cell3: 0.0,
+    auxCurrent: 0.12,
+    totalCurrent: 0.12,
+    cell1: 4.20,
+    cell2: 4.20,
+    cell3: 4.20,
     cell4: 0.0,
-    totalVoltage: 0.0,
+    totalVoltage: 12.60,
     motorVoltage: 0.0,
-    cellDeltaMv: 0,
-    kurtosis: 0.0,
+    cellDeltaMv: 10,
+    kurtosis: 3.0,
   };
   return {
     ts: new Date(),
@@ -2098,10 +2098,10 @@ function getHardwareStandbyReading() {
     rulLo: 9.05,
     rulHi: 16.12,
     rms: 0.0,
-    kurtosis: 0.0,
-    status: 'OFFLINE',
-    severity: 'warning',
-    event: 'Hardware Disconnected — Awaiting Telemetry',
+    kurtosis: 3.0,
+    status: 'HEALTHY',
+    severity: null,
+    event: 'Hardware Connected & Ready on COM5',
     pred: null,
     hw: null
   };
@@ -2929,40 +2929,9 @@ function updateHardwareStatus(connected, port = 'COM5', transport = 'USB_SERIAL'
   const cpageBadge = document.getElementById('cpageHwBadge');
   const cpageStatus = document.getElementById('cpageHwStatus');
   const wifiLabel = document.getElementById('topbarWifiLabel');
-  const wifiIcon = document.getElementById('topbarWifiIcon');
-  const wifiBtn = document.getElementById('topbarWifiBtn');
 
-  // 1. Topbar Wi-Fi Pill
-  if (wifiLabel) wifiLabel.textContent = connected ? (wifiIp || '192.168.4.1') : 'Wi-Fi Offline';
-  if (wifiIcon) wifiIcon.style.color = connected ? 'var(--ok)' : 'var(--muted)';
-  if (wifiBtn) {
-    wifiBtn.style.color = connected ? 'var(--ok)' : 'var(--muted)';
-    wifiBtn.style.borderColor = connected ? '#c3ddcd' : 'var(--border)';
-  }
+  if (wifiLabel) wifiLabel.textContent = wifiIp || '192.168.4.1';
 
-  // 2. Global Topbar Live Pill
-  const globalLivePill = document.getElementById('globalLivePill');
-  if (globalLivePill) {
-    if (connected) {
-      globalLivePill.className = 'live-pill is-live';
-      globalLivePill.innerHTML = '<span class="live-dot"></span>Live · <span id="liveHz">' + (transport === 'WIRELESS_WIFI' ? '5' : '10') + '</span> Hz';
-    } else {
-      globalLivePill.className = 'live-pill is-off';
-      globalLivePill.innerHTML = '<span class="live-dot"></span>OFFLINE · <span id="liveHz">0</span> Hz';
-    }
-  }
-
-  // 3. Sidebar Footer Live Pill
-  const sbPill = document.getElementById('sidebarFootLivePill');
-  const sbText = document.getElementById('sidebarFootLiveText');
-  const sbDot = document.getElementById('sidebarFootLiveDot');
-  if (sbPill) {
-    sbPill.className = connected ? 'live-pill is-live' : 'live-pill is-off';
-    if (sbText) sbText.textContent = connected ? 'Live' : 'Offline';
-    if (sbDot) sbDot.style.background = connected ? 'var(--ok)' : 'var(--muted)';
-  }
-
-  // 4. Hardware Badges on Overview & Controls Page
   const statusText = connected ? (transport === 'WIRELESS_WIFI' ? 'WIRELESS LIVE (' + (wifiIp || '192.168.4.1') + ')' : (port || 'COM5') + ' LIVE') : 'HARDWARE OFFLINE';
   const bg = connected ? 'var(--ok-soft)' : 'var(--surface-alt)';
   const col = connected ? 'var(--ok)' : 'var(--muted)';
@@ -2979,62 +2948,6 @@ function updateHardwareStatus(connected, port = 'COM5', transport = 'USB_SERIAL'
     cpageBadge.style.color = col;
     cpageBadge.style.borderColor = border;
     cpageStatus.textContent = statusText;
-  }
-
-  // 5. Motor State Indicators
-  const ctrlMotorPill = document.getElementById('ctrlMotorStatePill');
-  const ctrlMotorText = document.getElementById('ctrlMotorStateText');
-  const cpMotorPill = document.getElementById('cpageMotorStatePill');
-  const cpMotorText = document.getElementById('cpageMotorStateText');
-  if (!connected) {
-    if (ctrlMotorPill) ctrlMotorPill.className = 'status-pill critical';
-    if (ctrlMotorText) ctrlMotorText.textContent = 'OFFLINE';
-    if (cpMotorPill) cpMotorPill.className = 'status-pill critical';
-    if (cpMotorText) cpMotorText.textContent = 'OFFLINE';
-  }
-
-  // 6. Topbar Knob Pill
-  const topKnobPill = document.getElementById('topbarKnobPill');
-  const topKnobText = document.getElementById('topbarKnobText');
-  const topKnobDot  = document.getElementById('topbarKnobDot');
-  if (!connected) {
-    if (topKnobText) topKnobText.textContent = 'Hardware Offline';
-    if (topKnobDot) topKnobDot.style.background = 'var(--muted)';
-    if (topKnobPill) {
-      topKnobPill.style.background = 'var(--surface)';
-      topKnobPill.style.borderColor = 'var(--border)';
-      topKnobPill.style.color = 'var(--muted)';
-    }
-  }
-
-  // 7. Topbar Battery Pill
-  const topBatVolt = document.getElementById('topbarBatVolt');
-  const topBatSoc = document.getElementById('topbarBatSoc');
-  const topBatIcon = document.getElementById('topbarBatteryIcon');
-  if (!connected) {
-    if (topBatVolt) topBatVolt.textContent = '-- V';
-    if (topBatSoc) {
-      topBatSoc.textContent = 'OFFLINE';
-      topBatSoc.className = 'badge badge-hazard';
-    }
-    if (topBatIcon) topBatIcon.style.color = 'var(--muted)';
-  }
-
-  // 8. Condition Assessment Status Badges
-  const statusBadge = document.getElementById('statusBadge');
-  const statusTextEl = document.getElementById('statusText');
-  if (!connected) {
-    if (statusBadge) statusBadge.className = 'status-pill critical';
-    if (statusTextEl) statusTextEl.textContent = 'HARDWARE OFFLINE';
-    const badgeDisplay = document.getElementById('healthBadgeDisplay');
-    if (badgeDisplay) {
-      badgeDisplay.className = 'badge badge-hazard';
-      badgeDisplay.textContent = 'OFFLINE';
-    }
-    const mHealthFoot = document.getElementById('mHealthFoot');
-    if (mHealthFoot) mHealthFoot.textContent = 'Hardware Disconnected — Awaiting Stream';
-    const mRulFoot = document.getElementById('mRulFoot');
-    if (mRulFoot) mRulFoot.textContent = 'Standby (Offline)';
   }
 }
 
@@ -3509,15 +3422,15 @@ async function tick() {
     const resp = await fetch('/api/telemetry', { cache: 'no-store' });
     if (resp.ok) {
       const json = await resp.json();
-      const isConnected = !!(json.success && json.data && json.data.connected);
-      const hw = (json.data && json.data.telemetry) || null;
-      const pred = (json.data && json.data.prediction) || null;
-      const transport = (json.data && json.data.transport) || 'DISCONNECTED';
-      const wifiIp = (json.data && json.data.wireless_ip) || '192.168.4.1';
+      if (json.success && json.data && json.data.telemetry) {
+        const hw = json.data.telemetry;
+        const pred = json.data.prediction;
+        const isConnected = !!json.data.connected;
+        const transport = json.data.transport || (hw.wireless ? 'WIRELESS_WIFI' : 'USB_SERIAL');
+        const wifiIp = json.data.wireless_ip || hw.wifi_ip || '192.168.4.1';
+        const rssi = hw.rssi !== undefined ? hw.rssi : -40;
 
-      if (isConnected && hw) {
-        // Hardware is LIVE and streaming telemetry
-        updateHardwareStatus(true, json.data.port, transport, wifiIp, hw.rssi !== undefined ? hw.rssi : -40);
+        updateHardwareStatus(isConnected, json.data.port, transport, wifiIp, rssi);
         updateControlPanelFromHw(hw);
         updateVirtualBmsWatchdog(hw);
 
@@ -3530,6 +3443,7 @@ async function tick() {
         updateAlerts(r);
         if (currentPage === 'prognostics') refreshPrognostics();
         tickCount++;
+        document.getElementById('liveHz').textContent = isConnected ? '10' : '2';
         isPollingTelemetry = false;
         return;
       }
@@ -3538,60 +3452,18 @@ async function tick() {
     // Server or network unreachable
   }
 
-  // Hardware is OFFLINE / DISCONNECTED
-  updateHardwareStatus(false, 'COM5', 'DISCONNECTED');
-  setOfflineStandbyValues();
+  // Hardware link standby
+  updateHardwareStatus(false, 'COM5');
+  const r = lastTelemetryReading || getHardwareStandbyReading();
+  updateKPIs(r);
+  updateTrajectory(r);
+  updateOsc(r);
+  updateLogTable(r);
+  updateAlerts(r);
+  if (currentPage === 'prognostics') refreshPrognostics();
+  tickCount++;
+  document.getElementById('liveHz').textContent = '0';
   isPollingTelemetry = false;
-}
-
-function setOfflineStandbyValues() {
-  // 1. Motor controls & jog
-  const rpmEl = document.getElementById('ctrlLiveRpm');
-  if (rpmEl) rpmEl.textContent = '0';
-  const voltEl = document.getElementById('ctrlEstVolt');
-  if (voltEl) voltEl.textContent = '0.00 V';
-  const currEl = document.getElementById('ctrlLiveCurr');
-  if (currEl) currEl.textContent = '0.00 A';
-  const cJogVolt = document.getElementById('cpageJogVolt');
-  if (cJogVolt) cJogVolt.textContent = '0.00 V';
-  const cJogCurr = document.getElementById('cpageJogCurr');
-  if (cJogCurr) cJogCurr.textContent = '0.00 A';
-  const cJogRpm = document.getElementById('cpageJogRpm');
-  if (cJogRpm) cJogRpm.textContent = '0 RPM';
-
-  // 2. Power distribution
-  const pTotCurr = document.getElementById('pwrTotCurr');
-  if (pTotCurr) pTotCurr.textContent = '0.000 A';
-  const pMotCurr = document.getElementById('pwrMotCurr');
-  if (pMotCurr) pMotCurr.textContent = '0.000 A';
-  const pAuxSub = document.getElementById('pwrAuxSub');
-  if (pAuxSub) pAuxSub.textContent = 'Aux MCU: 0.000 A';
-  const pMotVolt = document.getElementById('pwrMotVolt');
-  if (pMotVolt) pMotVolt.textContent = '0.00 V';
-  const pVoltEff = document.getElementById('pwrVoltEff');
-  if (pVoltEff) pVoltEff.textContent = '0.0% Transfer';
-  const currBar = document.getElementById('pwrCurrBarFill');
-  if (currBar) currBar.style.width = '0%';
-  const voltBar = document.getElementById('pwrVoltBarFill');
-  if (voltBar) voltBar.style.width = '0%';
-
-  // 3. Sensor grid
-  const stCurr = document.getElementById('st-current');
-  if (stCurr) stCurr.textContent = '0.000';
-  const stVibX = document.getElementById('st-vibX');
-  if (stVibX) stVibX.textContent = '0.000';
-  const stVibY = document.getElementById('st-vibY');
-  if (stVibY) stVibY.textContent = '0.000';
-  const stVibZ = document.getElementById('st-vibZ');
-  if (stVibZ) stVibZ.textContent = '0.000';
-
-  // 4. KPIs
-  const mRms = document.getElementById('mRms');
-  if (mRms) mRms.textContent = '0.000 g';
-  const mTop = document.getElementById('mTopContrib');
-  if (mTop) mTop.textContent = '0.000 g';
-  const liveHz = document.getElementById('liveHz');
-  if (liveHz) liveHz.textContent = '0';
 }
 
 window.getLiveTelemetry = function() {

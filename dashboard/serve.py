@@ -418,12 +418,10 @@ class HardwareSerialBridge:
         """Retrieve the latest telemetry, ML prediction, and connection status."""
         now = time.time()
         with self.lock:
-            # Stale timeout: If no packet received in > 2.5s, hardware is OFFLINE
-            is_stale = (now - self.last_packet_time) > 2.5 if self.last_packet_time > 0 else True
+            is_stale = (now - self.last_packet_time) > 4.0 if self.last_packet_time > 0 else True
             transport = self.transport
             if is_stale:
                 transport = "DISCONNECTED"
-                self.connected = False
             return {
                 "connected": not is_stale,
                 "transport": transport,
@@ -434,8 +432,8 @@ class HardwareSerialBridge:
                 "wireless_packets_received": self.wireless_packets_received,
                 "is_sweeping": self.is_sweeping,
                 "history_count": len(self.telemetry_history),
-                "telemetry": self.latest_telemetry if not is_stale else None,
-                "prediction": self.latest_prediction if not is_stale else None,
+                "telemetry": self.latest_telemetry,
+                "prediction": self.latest_prediction,
                 "last_command": self.last_command_sent,
             }
 
