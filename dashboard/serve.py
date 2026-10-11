@@ -121,6 +121,7 @@ class HardwareSerialBridge:
         self.last_wireless_packet_time = 0
         self.wireless_packets_received = 0
         self.last_db_log_time = 0
+        self.last_ml_predict_time = 0
         self.bat_volt_buffer = collections.deque(maxlen=20)
         self.cell1_buffer = collections.deque(maxlen=20)
         self.cell2_buffer = collections.deque(maxlen=20)
@@ -243,17 +244,21 @@ class HardwareSerialBridge:
                         now = time.time()
                         pred = None
                         if ml_predictor is not None:
-                            try:
-                                pred = ml_predictor.predict(data)
-                            except Exception as err:
-                                pred = {"error": str(err), "rul_hours": 0.0, "status": "ERROR"}
+                            if (now - self.last_ml_predict_time >= 0.5) or (self.latest_prediction is None):
+                                self.last_ml_predict_time = now
+                                try:
+                                    pred = ml_predictor.predict(data)
+                                except Exception as err:
+                                    pred = {"error": str(err), "rul_hours": 0.0, "status": "ERROR"}
+                            else:
+                                pred = self.latest_prediction
 
                         with self.lock:
                             self.wireless_ip = addr[0]
                             self.last_wireless_packet_time = now
                             self.wireless_packets_received += 1
                             # If serial has not received a packet recently, wireless takes over
-                            if (now - self.last_packet_time > 1.2) or self.transport == "WIRELESS_WIFI":
+                            if (now - self.last_packet_time > 0.6) or self.transport == "WIRELESS_WIFI":
                                 self.transport = "WIRELESS_WIFI"
                                 self.connected = True
                                 self.latest_telemetry = data
@@ -308,12 +313,26 @@ class HardwareSerialBridge:
                 print(f"[SERIAL] Connected to ESP32 on {target_port} @ {self.baudrate} baud")
 
                 while self.running and self.ser and self.ser.is_open:
-                    raw_line = self.ser.readline()
-                    if not raw_line:
-                        continue
-
                     try:
-                        line = raw_line.decode("utf-8", errors="ignore").strip()
+                        # Prevent Windows USB serial buffer lag:
+                        # If more than 1 packet is queued (> 250 bytes), drain and grab strictly the freshest packet!
+                        waiting = self.ser.in_waiting
+                        if waiting > 250:
+                            chunk = self.ser.read(waiting)
+                            lines = chunk.split(b"\n")
+                            line = ""
+                            for raw_cand in reversed(lines):
+                                cand = raw_cand.decode("utf-8", errors="ignore").strip()
+                                if cand.startswith("{") and cand.endswith("}"):
+                                    line = cand
+                                    break
+                            if not line:
+                                continue
+                        else:
+                            raw_line = self.ser.readline()
+                            if not raw_line:
+                                continue
+                            line = raw_line.decode("utf-8", errors="ignore").strip()
                     except Exception:
                         continue
 
@@ -324,19 +343,24 @@ class HardwareSerialBridge:
                         try:
                             data = json.loads(line)
                             data = self._smooth_battery_telemetry(data)
+                            now_ser = time.time()
                             pred = None
                             if ml_predictor is not None:
-                                try:
-                                    pred = ml_predictor.predict(data)
-                                except Exception as err:
-                                    pred = {"error": str(err), "rul_hours": 0.0, "status": "ERROR"}
+                                if (now_ser - self.last_ml_predict_time >= 0.5) or (self.latest_prediction is None):
+                                    self.last_ml_predict_time = now_ser
+                                    try:
+                                        pred = ml_predictor.predict(data)
+                                    except Exception as err:
+                                        pred = {"error": str(err), "rul_hours": 0.0, "status": "ERROR"}
+                                else:
+                                    pred = self.latest_prediction
 
                             with self.lock:
                                 self.transport = "USB_SERIAL"
                                 self.connected = True
                                 self.latest_telemetry = data
                                 self.latest_prediction = pred
-                                self.last_packet_time = time.time()
+                                self.last_packet_time = now_ser
                                 self.packets_received += 1
                                 self.telemetry_history.append({
                                     "time": time.strftime("%Y-%m-%d %H:%M:%S"),

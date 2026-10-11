@@ -3413,6 +3413,7 @@ function transformHardwareTelemetry(hw, pred) {
 let tickCount = 0;
 let lastTelemetryReading = null;
 let isPollingTelemetry = false;
+let lastTelemetrySuccessTime = Date.now();
 
 async function tick() {
   if (!streaming || isPollingTelemetry) return;
@@ -3423,6 +3424,7 @@ async function tick() {
     if (resp.ok) {
       const json = await resp.json();
       if (json.success && json.data && json.data.telemetry) {
+        lastTelemetrySuccessTime = Date.now();
         const hw = json.data.telemetry;
         const pred = json.data.prediction;
         const isConnected = !!json.data.connected;
@@ -3445,6 +3447,7 @@ async function tick() {
         tickCount++;
         document.getElementById('liveHz').textContent = isConnected ? '10' : '2';
         isPollingTelemetry = false;
+        setTimeout(tick, 100);
         return;
       }
     }
@@ -3452,9 +3455,12 @@ async function tick() {
     // Server or network unreachable
   }
 
-  // Hardware link standby
-  updateHardwareStatus(false, 'COM5');
-  const r = lastTelemetryReading || getHardwareStandbyReading();
+  // Hardware link standby: keep active telemetry during short network jitter (3.0s grace period)
+  const isGracePeriod = (Date.now() - lastTelemetrySuccessTime) < 3000;
+  if (!isGracePeriod) {
+    updateHardwareStatus(false, 'COM5');
+  }
+  const r = (isGracePeriod && lastTelemetryReading) ? lastTelemetryReading : (lastTelemetryReading || getHardwareStandbyReading());
   updateKPIs(r);
   updateTrajectory(r);
   updateOsc(r);
@@ -3462,8 +3468,11 @@ async function tick() {
   updateAlerts(r);
   if (currentPage === 'prognostics') refreshPrognostics();
   tickCount++;
-  document.getElementById('liveHz').textContent = '0';
+  if (!isGracePeriod) {
+    document.getElementById('liveHz').textContent = '0';
+  }
   isPollingTelemetry = false;
+  setTimeout(tick, 200);
 }
 
 window.getLiveTelemetry = function() {
@@ -3508,7 +3517,8 @@ window.getLiveTelemetry = function() {
   };
 };
 
-setInterval(tick, 80);
+// Start sequential non-overlapping polling
+tick();
 
 // Initial prognostics range group
 document.getElementById('progRangeGroup').addEventListener('click', e => {
