@@ -2950,7 +2950,10 @@ let motorControlState = {
   isInteracting: false
 };
 
+let lastSoftwareCmdTime = 0;
+
 async function sendMotorCmd(action, value = null) {
+  lastSoftwareCmdTime = Date.now();
   // Optimistic UI updates
   if (action === 'start') {
     motorControlState.running = true;
@@ -3443,6 +3446,12 @@ function handlePhysicalKnobFeedback(hw) {
     return;
   }
 
+  // If command was sent by web software within last 3 seconds, sync state silently without showing "Knob:" notices
+  if (Date.now() - lastSoftwareCmdTime < 3000) {
+    lastKnownHwPwm = pwm;
+    return;
+  }
+
   if (pwm !== lastKnownHwPwm) {
     let action = '';
     let badgeClass = 'badge-info';
@@ -3645,14 +3654,30 @@ function transformHardwareTelemetry(hw, pred) {
 // ─────────── MAIN TELEMETRY LOOP ───────────
 let tickCount = 0;
 let lastTelemetryReading = null;
-let isPollingTelemetry = false;
+let consecutiveOfflineFailures = 0;
+let telemetryPollTimeoutId = null;
+
+function scheduleNextTelemetryPoll(delayMs = 220) {
+  if (telemetryPollTimeoutId) clearTimeout(telemetryPollTimeoutId);
+  telemetryPollTimeoutId = setTimeout(tick, delayMs);
+}
 
 async function tick() {
-  if (!streaming || isPollingTelemetry) return;
-  isPollingTelemetry = true;
+  if (!streaming) {
+    scheduleNextTelemetryPoll(300);
+    return;
+  }
+
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), 1800);
 
   try {
-    const resp = await fetch('/api/telemetry', { cache: 'no-store' });
+    const resp = await fetch('/api/telemetry', {
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    clearTimeout(abortTimer);
+
     if (resp.ok) {
       const json = await resp.json();
       const isConnected = !!(json.success && json.data && json.data.connected);
@@ -3662,7 +3687,7 @@ async function tick() {
       const wifiIp = (json.data && json.data.wireless_ip) || '192.168.4.1';
 
       if (isConnected && hw) {
-        // Hardware is LIVE and streaming telemetry
+        consecutiveOfflineFailures = 0;
         updateHardwareStatus(true, json.data.port, transport, wifiIp, hw.rssi !== undefined ? hw.rssi : -40);
         updateControlPanelFromHw(hw);
         updateVirtualBmsWatchdog(hw);
@@ -3676,18 +3701,21 @@ async function tick() {
         updateAlerts(r);
         if (currentPage === 'prognostics') refreshPrognostics();
         tickCount++;
-        isPollingTelemetry = false;
+        scheduleNextTelemetryPoll(220);
         return;
       }
     }
   } catch (err) {
-    // Server or network unreachable
+    clearTimeout(abortTimer);
   }
 
-  // Hardware is OFFLINE / DISCONNECTED
-  updateHardwareStatus(false, 'COM5', 'DISCONNECTED');
-  setOfflineStandbyValues();
-  isPollingTelemetry = false;
+  // Grace period filter: Only enter offline standby if 8 consecutive packets dropped (~2.5s)
+  consecutiveOfflineFailures++;
+  if (consecutiveOfflineFailures >= 8) {
+    updateHardwareStatus(false, 'COM5', 'DISCONNECTED');
+    setOfflineStandbyValues();
+  }
+  scheduleNextTelemetryPoll(300);
 }
 
 function setOfflineStandbyValues() {
@@ -3782,8 +3810,8 @@ window.getLiveTelemetry = function() {
   };
 };
 
-// Match hardware 5 Hz streaming rate (180ms eliminates HTTP congestion & browser lag)
-setInterval(tick, 180);
+// Start smooth non-overlapping telemetry polling loop (zero queue backlog)
+tick();
 
 // Initial prognostics range group
 document.getElementById('progRangeGroup').addEventListener('click', e => {
