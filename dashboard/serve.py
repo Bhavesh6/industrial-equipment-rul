@@ -27,9 +27,6 @@ import csv
 import io
 import socket
 import urllib.request
-import urllib.parse
-import warnings
-warnings.filterwarnings('ignore')
 from pathlib import Path
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -255,6 +252,8 @@ class HardwareSerialBridge:
                             self.wireless_ip = addr[0]
                             self.last_wireless_packet_time = now
                             self.wireless_packets_received += 1
+                            if self.wireless_packets_received == 1:
+                                threading.Thread(target=lambda: (time.sleep(0.3), self.send_command("CAL_TRIM_IMOT=0.0900")), daemon=True).start()
                             # If serial has not received a packet recently, wireless takes over
                             if (now - self.last_packet_time > 1.2) or self.transport == "WIRELESS_WIFI":
                                 self.transport = "WIRELESS_WIFI"
@@ -309,6 +308,7 @@ class HardwareSerialBridge:
                 self.connected = True
                 self.transport = "USB_SERIAL"
                 print(f"[SERIAL] Connected to ESP32 on {target_port} @ {self.baudrate} baud")
+                threading.Thread(target=lambda: (time.sleep(0.5), self.send_command("CAL_TRIM_IMOT=0.0900")), daemon=True).start()
 
                 while self.running and self.ser and self.ser.is_open:
                     raw_line = self.ser.readline()
@@ -399,19 +399,8 @@ class HardwareSerialBridge:
             except Exception as e:
                 msgs.append(f"Serial err: {e}")
 
-        # 2. Send via Direct HTTP REST if wireless IP is discovered
-        target_ip = self.wireless_ip or "192.168.1.6"
-        if target_ip:
-            try:
-                cmd_url = f"http://{target_ip}/cmd?c={urllib.parse.quote(cmd_str)}"
-                with urllib.request.urlopen(cmd_url, timeout=0.8) as http_resp:
-                    r_text = http_resp.read().decode("utf-8", errors="ignore").strip()
-                    success = True
-                    msgs.append(f"Direct HTTP ({target_ip}: {r_text})")
-            except Exception as e:
-                pass
-
-        # 3. Send via Wireless UDP to ESP32 IP
+        # 2. Send via Wireless UDP to ESP32 IP
+        target_ip = self.wireless_ip or "192.168.4.1"
         try:
             udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             udp_sock.settimeout(0.3)
@@ -432,9 +421,8 @@ class HardwareSerialBridge:
         """Retrieve the latest telemetry, ML prediction, and connection status."""
         now = time.time()
         with self.lock:
-            # Stale timeout: If no packet received in > 5.0s, hardware is OFFLINE
-            packet_age = (now - self.last_packet_time) if self.last_packet_time > 0 else 999.0
-            is_stale = packet_age > 5.0
+            # Stale timeout: If no packet received in > 2.5s, hardware is OFFLINE
+            is_stale = (now - self.last_packet_time) > 2.5 if self.last_packet_time > 0 else True
             transport = self.transport
             if is_stale:
                 transport = "DISCONNECTED"
@@ -444,13 +432,13 @@ class HardwareSerialBridge:
                 "transport": transport,
                 "port": self.active_port or self.preferred_port,
                 "wireless_ip": self.wireless_ip or "192.168.4.1",
-                "last_packet_age_s": round(packet_age, 2) if self.last_packet_time > 0 else None,
+                "last_packet_age_s": round(now - self.last_packet_time, 2) if self.last_packet_time > 0 else None,
                 "packets_received": self.packets_received,
                 "wireless_packets_received": self.wireless_packets_received,
                 "is_sweeping": self.is_sweeping,
                 "history_count": len(self.telemetry_history),
-                "telemetry": self.latest_telemetry if packet_age < 10.0 else None,
-                "prediction": self.latest_prediction if packet_age < 10.0 else None,
+                "telemetry": self.latest_telemetry if not is_stale else None,
+                "prediction": self.latest_prediction if not is_stale else None,
                 "last_command": self.last_command_sent,
             }
 

@@ -2389,9 +2389,7 @@ function updateTrajectory(r) {
   if (trajData.labels.length > MAX_TRAJ) {
     trajData.labels.shift(); trajData.health.shift(); trajData.rul_norm.shift();
   }
-  if (currentPage === 'overview') {
-    trajChart.update('none');
-  }
+  trajChart.update();
 }
 
 // Oscilloscope rolling buffer
@@ -2414,14 +2412,12 @@ function updateOsc(r) {
   const elWkurt = document.getElementById('wKurt');
   if (elWkurt) elWkurt.textContent = fmt(r.kurtosis, 2) + ' β₂';
 
-  // Only update charts if currently viewing the waveforms tab (eliminates background CPU lag)
-  if (currentPage === 'waveforms') {
-    if (oscX) { oscX.data.datasets[0].data = [...oscBufs.vibX]; oscX.update('none'); }
-    if (oscY) { oscY.data.datasets[0].data = [...oscBufs.vibY]; oscY.update('none'); }
-    if (oscZ) { oscZ.data.datasets[0].data = [...oscBufs.vibZ]; oscZ.update('none'); }
-    if (oscTemp) { oscTemp.data.datasets[0].data = [...oscBufs.temp]; oscTemp.update('none'); }
-    if (oscCurr) { oscCurr.data.datasets[0].data = [...oscBufs.current]; oscCurr.update('none'); }
-  }
+  // Only update if charts have been initialized (waveforms tab visited)
+  if (oscX) { oscX.data.datasets[0].data = [...oscBufs.vibX]; oscX.update(); }
+  if (oscY) { oscY.data.datasets[0].data = [...oscBufs.vibY]; oscY.update(); }
+  if (oscZ) { oscZ.data.datasets[0].data = [...oscBufs.vibZ]; oscZ.update(); }
+  if (oscTemp) { oscTemp.data.datasets[0].data = [...oscBufs.temp]; oscTemp.update(); }
+  if (oscCurr) { oscCurr.data.datasets[0].data = [...oscBufs.current]; oscCurr.update(); }
 }
 
 // Telemetry log table — clean capped feed of latest 10 snapshots
@@ -2950,10 +2946,7 @@ let motorControlState = {
   isInteracting: false
 };
 
-let lastSoftwareCmdTime = 0;
-
 async function sendMotorCmd(action, value = null) {
-  lastSoftwareCmdTime = Date.now();
   // Optimistic UI updates
   if (action === 'start') {
     motorControlState.running = true;
@@ -3446,12 +3439,6 @@ function handlePhysicalKnobFeedback(hw) {
     return;
   }
 
-  // If command was sent by web software within last 3 seconds, sync state silently without showing "Knob:" notices
-  if (Date.now() - lastSoftwareCmdTime < 3000) {
-    lastKnownHwPwm = pwm;
-    return;
-  }
-
   if (pwm !== lastKnownHwPwm) {
     let action = '';
     let badgeClass = 'badge-info';
@@ -3654,30 +3641,14 @@ function transformHardwareTelemetry(hw, pred) {
 // ─────────── MAIN TELEMETRY LOOP ───────────
 let tickCount = 0;
 let lastTelemetryReading = null;
-let consecutiveOfflineFailures = 0;
-let telemetryPollTimeoutId = null;
-
-function scheduleNextTelemetryPoll(delayMs = 220) {
-  if (telemetryPollTimeoutId) clearTimeout(telemetryPollTimeoutId);
-  telemetryPollTimeoutId = setTimeout(tick, delayMs);
-}
+let isPollingTelemetry = false;
 
 async function tick() {
-  if (!streaming) {
-    scheduleNextTelemetryPoll(300);
-    return;
-  }
-
-  const controller = new AbortController();
-  const abortTimer = setTimeout(() => controller.abort(), 1800);
+  if (!streaming || isPollingTelemetry) return;
+  isPollingTelemetry = true;
 
   try {
-    const resp = await fetch('/api/telemetry', {
-      cache: 'no-store',
-      signal: controller.signal
-    });
-    clearTimeout(abortTimer);
-
+    const resp = await fetch('/api/telemetry', { cache: 'no-store' });
     if (resp.ok) {
       const json = await resp.json();
       const isConnected = !!(json.success && json.data && json.data.connected);
@@ -3687,7 +3658,7 @@ async function tick() {
       const wifiIp = (json.data && json.data.wireless_ip) || '192.168.4.1';
 
       if (isConnected && hw) {
-        consecutiveOfflineFailures = 0;
+        // Hardware is LIVE and streaming telemetry
         updateHardwareStatus(true, json.data.port, transport, wifiIp, hw.rssi !== undefined ? hw.rssi : -40);
         updateControlPanelFromHw(hw);
         updateVirtualBmsWatchdog(hw);
@@ -3701,21 +3672,18 @@ async function tick() {
         updateAlerts(r);
         if (currentPage === 'prognostics') refreshPrognostics();
         tickCount++;
-        scheduleNextTelemetryPoll(220);
+        isPollingTelemetry = false;
         return;
       }
     }
   } catch (err) {
-    clearTimeout(abortTimer);
+    // Server or network unreachable
   }
 
-  // Grace period filter: Only enter offline standby if 8 consecutive packets dropped (~2.5s)
-  consecutiveOfflineFailures++;
-  if (consecutiveOfflineFailures >= 8) {
-    updateHardwareStatus(false, 'COM5', 'DISCONNECTED');
-    setOfflineStandbyValues();
-  }
-  scheduleNextTelemetryPoll(300);
+  // Hardware is OFFLINE / DISCONNECTED
+  updateHardwareStatus(false, 'COM5', 'DISCONNECTED');
+  setOfflineStandbyValues();
+  isPollingTelemetry = false;
 }
 
 function setOfflineStandbyValues() {
@@ -3810,8 +3778,7 @@ window.getLiveTelemetry = function() {
   };
 };
 
-// Start smooth non-overlapping telemetry polling loop (zero queue backlog)
-tick();
+setInterval(tick, 80);
 
 // Initial prognostics range group
 document.getElementById('progRangeGroup').addEventListener('click', e => {

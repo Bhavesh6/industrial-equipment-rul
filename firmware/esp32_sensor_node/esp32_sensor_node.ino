@@ -84,7 +84,7 @@ float acs_sensitivity            = 0.100;      // Volts per Ampere (20A module d
 const float ACS_DIVIDER_FACTOR   = 0.456;      // Measured output divider ratio
 float zero_curr_motor_volt       = 1.139;      // Zero-current quiescent voltage
 float zero_curr_total_volt       = 1.137;      // Zero-current quiescent voltage
-float cal_curr_motor_mult        = 0.180;      // Calibrated multiplier for RS-380 PWM drive (0.35A idle, jumps to 2.5A on hand stall)
+float cal_curr_motor_mult        = 0.090;      // Calibrated multiplier for RS-380 L298N PWM drive (0.35A - 0.50A no-load)
 float cal_curr_total_mult        = 1.000;      // Fine-calibration trim multiplier
 bool  enable_slew_rate           = true;       // Slew-rate soft-start ramp toggle
 float last_raw_adc_m             = 0.000;      // Last sampled raw ADC voltage on GPIO 36
@@ -156,32 +156,29 @@ void IRAM_ATTR isr_encoder_clk() {
   // Only lockout physical knob for 1.2s if an automated SCADA sweep command was just sent
   if (now - last_scada_cmd_time < 1200) return;
 
-  // Digital glitch rejection: Commutator EMI spikes on brushed RS-380 motor last < 15 microseconds.
-  // A genuine mechanical KY-040 detent click holds LOW for > 1500 microseconds.
-  // Delay 250us and verify CLK is still LOW before accepting the interrupt:
-  ets_delay_us(250);
-  if (digitalRead(PIN_ENC_CLK) != LOW) return; // Glitch filter rejected motor noise pulse
-
   static unsigned long last_clk_time = 0;
-  if (now - last_clk_time < 30) return; // 30ms solid mechanical detent filter
+  if (now - last_clk_time < 20) return; // 20ms clean mechanical filter
 
   int dt = digitalRead(PIN_ENC_DT);
   if (dt == HIGH) {
     // Clockwise (increase speed)
-    if (encoder_position < 150) {
-      encoder_position = 160;
+    if (!motor_running || encoder_position == 0) {
+      encoder_position = 160; // Reliable starting speed for RS-380
+      motor_running = true;
     } else if (encoder_position <= 245) {
       encoder_position += 10;
     } else {
       encoder_position = 255;
     }
-    // Note: Rotating the knob does NOT auto-start motor while stopped. User must click knob or web start.
+    safety_tripped = false;
+    safety_trip_reason = "NONE";
   } else {
     // Counter-clockwise (decrease speed)
     if (encoder_position > 150) {
       encoder_position -= 10;
     } else {
-      encoder_position = 150; // Keep at minimum running floor; user clicks knob to stop
+      encoder_position = 0; // Stop cleanly below 150
+      motor_running = false;
     }
   }
   last_clk_time = now;
@@ -472,12 +469,11 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
     safety_trip_reason = "NONE";
   }
 
-  // 3. Overcurrent trip with 2000ms duration persistence (allows motor inrush & hand stall demo without false trip)
+  // 3. Overcurrent trip with 1200ms duration persistence (allows motor inrush without false trip)
   static unsigned long oc_start_time = 0;
-  if (safety_tripped) oc_start_time = 0;
-  if (i_total > 5.50 || (i_motor > 5.20 && i_total > 3.60)) {
+  if (i_total > 4.50 || (i_motor > 4.50 && i_total > 2.20)) {
     if (oc_start_time == 0) oc_start_time = millis();
-    else if (millis() - oc_start_time > 2000) {
+    else if (millis() - oc_start_time > 1200) {
       safety_tripped = true;
       safety_trip_reason = "OVERCURRENT_TRIP";
     }
@@ -535,27 +531,20 @@ String execute_command(String cmd) {
       motor_running = true;
       safety_tripped = false;
       safety_trip_reason = "NONE";
-      apply_motor_speed(encoder_position, motor_dir_forward);
-      motor_pwm_target = encoder_position;
     } else {
       motor_running = false;
-      apply_motor_speed(0, motor_dir_forward);
-      motor_pwm_target = 0;
     }
     return String("[CMD] Speed set to PWM ") + String(encoder_position);
   } else if (cmd == "STOP") {
     motor_running = false;
     encoder_position = 0;
     apply_motor_speed(0, motor_dir_forward);
-    motor_pwm_target = 0;
     return "[CMD] Motor Stopped.";
   } else if (cmd == "START") {
     motor_running = true;
     safety_tripped = false;
     safety_trip_reason = "NONE";
     if (encoder_position < 140) encoder_position = 160;
-    apply_motor_speed(encoder_position, motor_dir_forward);
-    motor_pwm_target = encoder_position;
     return String("[CMD] Motor Started @ PWM ") + String(encoder_position);
   } else if (cmd == "REVERSE" || cmd == "DIR=TOGGLE") {
     motor_dir_forward = !motor_dir_forward;
