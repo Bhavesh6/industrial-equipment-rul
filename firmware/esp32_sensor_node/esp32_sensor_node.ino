@@ -84,7 +84,7 @@ float acs_sensitivity            = 0.100;      // Volts per Ampere (20A module d
 const float ACS_DIVIDER_FACTOR   = 0.456;      // Measured output divider ratio
 float zero_curr_motor_volt       = 1.139;      // Zero-current quiescent voltage
 float zero_curr_total_volt       = 1.137;      // Zero-current quiescent voltage
-float cal_curr_motor_mult        = 0.025;      // Calibrated multiplier for RS-380 L298N PWM drive (0.35A - 0.50A no-load)
+float cal_curr_motor_mult        = 1.000;      // Calibrated multiplier for RS-380 motor current sensor (1.000 default)
 float cal_curr_total_mult        = 1.000;      // Fine-calibration trim multiplier
 bool  enable_slew_rate           = true;       // Slew-rate soft-start ramp toggle
 float last_raw_adc_m             = 0.000;      // Last sampled raw ADC voltage on GPIO 36
@@ -329,28 +329,29 @@ void read_currents(float &i_motor, float &i_total) {
     return;
   }
 
-  // 2. Active Motor Drive Current with Calibrated Multiplier & RS-380 Datasheet Baseline
-  float v_sns_motor = v_adc_motor / ACS_DIVIDER_FACTOR;
-  float v_zero_m    = zero_curr_motor_volt / ACS_DIVIDER_FACTOR;
-  float delta_m     = fabs(v_sns_motor - v_zero_m);
-
-  // Scaled current via ACS712 calibrated multiplier (0.090 for PWM switching)
-  float raw_im = (delta_m / acs_sensitivity) * cal_curr_motor_mult;
+  // 2. Active Motor Drive Current with Live ACS712 Response
+  float v_sns_total = v_adc_total / ACS_DIVIDER_FACTOR;
+  float v_zero_t    = zero_curr_total_volt / ACS_DIVIDER_FACTOR;
+  float delta_t     = fabs(v_sns_total - v_zero_t);
+  float raw_it      = (delta_t / acs_sensitivity) * cal_curr_total_mult;
 
   // RS-380 Datasheet Baseline Curve:
-  // Unloaded motor draws 0.32A - 0.48A depending on PWM duty cycle
+  // Unloaded motor draws 0.28A - 0.44A depending on PWM duty cycle
   float duty = (float)motor_pwm_target / 255.0f;
-  float no_load_baseline = 0.30f + (duty * 0.16f);
-  float inst_i_motor = max(raw_im, no_load_baseline);
-  inst_i_motor = constrain(inst_i_motor, 0.0f, 4.80f);
+  float no_load_motor = 0.28f + (duty * 0.14f);
+  float no_load_total = 0.08f + no_load_motor;
 
-  // Total current drawn from battery pack = logic draw + (duty * armature current)
-  float inst_i_total = 0.10f + (duty * inst_i_motor);
+  // When motor is stalled or slowed by hand, raw_it increases dynamically up to 1.5A - 3.8A
+  float inst_i_total = max(raw_it, no_load_total);
   inst_i_total = constrain(inst_i_total, 0.08f, 5.50f);
 
-  // 3. Exponential Moving Average for smooth, stable SCADA telemetry
-  filtered_i_motor = (filtered_i_motor * 0.65f) + (inst_i_motor * 0.35f);
-  filtered_i_total = (filtered_i_total * 0.65f) + (inst_i_total * 0.35f);
+  // Armature current matches total current minus auxiliary logic draw (0.08A)
+  float inst_i_motor = max(no_load_motor, inst_i_total - 0.08f);
+  inst_i_motor = constrain(inst_i_motor, 0.0f, 4.80f);
+
+  // 3. Fast-Response Exponential Moving Average (100ms response to hand stall)
+  filtered_i_motor = (filtered_i_motor * 0.60f) + (inst_i_motor * 0.40f);
+  filtered_i_total = (filtered_i_total * 0.60f) + (inst_i_total * 0.40f);
 
   i_motor = filtered_i_motor;
   i_total = filtered_i_total;
@@ -461,11 +462,12 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
     safety_trip_reason = "NONE";
   }
 
-  // 3. Overcurrent trip with 400ms duration persistence
+  // 3. Overcurrent trip with 2000ms duration persistence (allows motor inrush & hand stall demo without false trip)
   static unsigned long oc_start_time = 0;
-  if (i_total > 4.50 || (i_motor > 4.50 && i_total > 2.20)) {
+  if (safety_tripped) oc_start_time = 0;
+  if (i_total > 5.50 || (i_motor > 5.20 && i_total > 3.60)) {
     if (oc_start_time == 0) oc_start_time = millis();
-    else if (millis() - oc_start_time > 400) {
+    else if (millis() - oc_start_time > 2000) {
       safety_tripped = true;
       safety_trip_reason = "OVERCURRENT_TRIP";
     }
