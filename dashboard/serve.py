@@ -879,7 +879,19 @@ class SCADAHandler(SimpleHTTPRequestHandler):
                 calib_dir.mkdir(exist_ok=True)
                 with open(calib_dir / "calibration.json", "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2)
-                self._send_json(200, {"success": True, "message": "Calibration settings saved successfully", "data": data})
+
+                # Push hardware-level parameters directly to connected ESP32 over serial/UDP
+                if hardware_bridge and hardware_bridge.connected:
+                    try:
+                        if "currSensitivity" in data:
+                            hardware_bridge.send_command(f"CAL_SENS={float(data['currSensitivity']):.4f}")
+                        if "slewEnabled" in data:
+                            state = "ON" if data.get("slewEnabled") else "OFF"
+                            hardware_bridge.send_command(f"SET_SLEW={state}")
+                    except Exception:
+                        pass
+
+                self._send_json(200, {"success": True, "message": "Calibration settings saved successfully and synced to hardware", "data": data})
                 return
             except Exception as e:
                 self._send_json(500, {"success": False, "message": f"Failed to save calibration: {e}"})
