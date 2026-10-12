@@ -169,7 +169,8 @@ void IRAM_ATTR isr_encoder_clk() {
       } else {
         encoder_position = 255;
       }
-      motor_running = true;
+      // Note: rotating knob presets speed, but does NOT auto-start motor if stopped.
+      // User must click the knob button (or web Start) to engage motor power.
       safety_tripped = false;
     } else {
       // Counter-clockwise (decrease speed)
@@ -177,7 +178,9 @@ void IRAM_ATTR isr_encoder_clk() {
         encoder_position -= 10;
       } else {
         encoder_position = 0; // Stop motor cleanly when dialed below min threshold
-        motor_running = false;
+        if (motor_running) {
+          motor_running = false;
+        }
       }
     }
     last_clk_time = now;

@@ -2804,7 +2804,10 @@ let motorControlState = {
   isInteracting: false
 };
 
+let lastSoftwareCmdTime = 0;
+
 async function sendMotorCmd(action, value = null) {
+  lastSoftwareCmdTime = Date.now();
   // Optimistic UI updates
   if (action === 'start') {
     motorControlState.running = true;
@@ -3210,6 +3213,9 @@ function handlePhysicalKnobFeedback(hw) {
     return;
   }
 
+  // Check if this PWM transition was caused by a software actuation command
+  const isSoftwareCommand = (Date.now() - lastSoftwareCmdTime) < 3000;
+
   if (pwm !== lastKnownHwPwm) {
     let action = '';
     let badgeClass = 'badge-info';
@@ -3232,7 +3238,7 @@ function handlePhysicalKnobFeedback(hw) {
     const topPill = document.getElementById('topbarKnobPill');
     const topText = document.getElementById('topbarKnobText');
     const topDot  = document.getElementById('topbarKnobDot');
-    if (topText) topText.textContent = isRunning ? `Knob: ${action}` : 'Knob: Standby (0 PWM)';
+    if (topText) topText.textContent = isRunning ? (isSoftwareCommand ? `Motor: PWM ${pwm}` : `Knob: ${action}`) : 'Knob: Standby (0 PWM)';
     if (topDot) topDot.style.background = isRunning ? 'var(--ok)' : 'var(--muted)';
     if (topPill) {
       topPill.style.borderColor = isRunning ? 'var(--ok)' : 'var(--border)';
@@ -3245,23 +3251,23 @@ function handlePhysicalKnobFeedback(hw) {
     const ovText   = document.getElementById('overviewKnobActionText');
     const ovBadge  = document.getElementById('overviewKnobStateBadge');
     const ovDot    = document.getElementById('knobActivityDot');
-    if (ovText) ovText.textContent = isRunning ? `${action} • ${rpm} RPM • ${v_mot}V • ${i_mot}A` : 'Standby / Stopped (0 PWM)';
+    if (ovText) ovText.textContent = isRunning ? (isSoftwareCommand ? `Motor Active • ${rpm} RPM • ${v_mot}V • ${i_mot}A` : `${action} • ${rpm} RPM • ${v_mot}V • ${i_mot}A`) : 'Standby / Stopped (0 PWM)';
     if (ovDot) ovDot.style.background = isRunning ? 'var(--ok)' : 'var(--muted)';
     if (ovBadge) {
       ovBadge.className = 'badge ' + badgeClass;
       ovBadge.textContent = isRunning ? `PWM ${pwm}` : 'STANDBY';
     }
-    if (ovBanner) {
-      ovBanner.style.borderColor = isRunning ? 'var(--accent)' : 'var(--border)';
-      ovBanner.style.background = isRunning ? 'var(--surface-alt)' : 'var(--surface)';
-      ovBanner.style.boxShadow = isRunning ? '0 0 10px rgba(217,119,6,0.25)' : 'none';
+
+    // 3. ONLY for PHYSICAL knob events (NOT software clicks): show HUD Toast and Console Log!
+    if (!isSoftwareCommand) {
+      appendConsoleLog(`[PHYSICAL KNOB] ${action} | RPM: ${rpm} | ${v_mot}V | ${i_mot}A`, isRunning ? 'resp' : 'err');
+      showHardwareKnobToast(action, pwm, rpm, v_mot, i_mot);
+      if (ovBanner) {
+        ovBanner.style.borderColor = isRunning ? 'var(--accent)' : 'var(--border)';
+        ovBanner.style.background = isRunning ? 'var(--surface-alt)' : 'var(--surface)';
+        ovBanner.style.boxShadow = isRunning ? '0 0 10px rgba(217,119,6,0.25)' : 'none';
+      }
     }
-
-    // 3. SCADA Console Log
-    appendConsoleLog(`[PHYSICAL KNOB] ${action} | RPM: ${rpm} | ${v_mot}V | ${i_mot}A`, isRunning ? 'resp' : 'err');
-
-    // 4. Floating HUD Toast
-    showHardwareKnobToast(action, pwm, rpm, v_mot, i_mot);
 
     clearTimeout(knobEventTimeout);
     knobEventTimeout = setTimeout(() => {
