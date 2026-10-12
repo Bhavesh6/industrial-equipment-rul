@@ -402,22 +402,24 @@ svg.lucide {
 @media (min-width: 1025px) { .nav-scrim { display: none !important; } }
 
 /* ══════════════════════════════════════════════════════════════════
-   TOPBAR
+   TOPBAR & RESPONSIVE ADAPTATION
    ══════════════════════════════════════════════════════════════════ */
 .menu-toggle-mobile { display: none !important; }
 .topbar {
-  height: var(--topbar-h);
+  min-height: var(--topbar-h);
+  height: auto;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 0 24px;
+  gap: 12px;
+  padding: 10px 24px;
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
   transition: box-shadow 200ms;
+  flex-wrap: wrap;
 }
 .topbar h1 {
   font-size: 1rem !important;
@@ -430,6 +432,28 @@ svg.lucide {
 .topbar-sub {
   font-size: .72rem;
   color: var(--muted);
+  white-space: nowrap;
+}
+#topbarSlot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 1300px) {
+  .topbar { padding: 10px 18px; }
+  .topbar .btn-label { display: none !important; }
+}
+@media (max-width: 960px) {
+  .topbar { padding: 8px 14px; }
+  .topbar-sub { display: none !important; }
+  #topbarKnobPill { display: none !important; }
+}
+@media (max-width: 640px) {
+  .topbar { padding: 8px 12px; }
+  #topbarBatteryPill { display: none !important; }
+  .content { padding: 14px !important; }
 }
 .content {
   padding: 24px;

@@ -14,8 +14,8 @@
   <link rel="stylesheet" href="css/fonts.css?v=20260929_fix2">
   <script src="js/chart.min.js"></script>
   <script src="js/chatbot.js?v=20260930_v4"></script>
-  <link rel="stylesheet" href="css/app.css?v=20260929_fix2">
-  <link rel="stylesheet" href="css/pro.css?v=20260930_v4">
+  <link rel="stylesheet" href="css/app.css?v=20261012_v1">
+  <link rel="stylesheet" href="css/pro.css?v=20261012_v1">
   <style>
     /* ── Page-level overrides ── */
     .mono { font-family: 'JetBrains Mono', monospace; }
@@ -932,9 +932,9 @@
               <!-- Physical KY-040 Center Push Switch Button -->
               <div style="display:flex;justify-content:center;margin:6px 0">
                 <button type="button" class="btn btn-outline" id="btnEncoderPushSwitch" onclick="clickEncoderButton()"
-                        style="width:100%;max-width:380px;padding:12px;background:linear-gradient(180deg, var(--surface) 0%, var(--surface-alt) 100%);border:2px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:var(--shadow);cursor:pointer;transition:transform .1s ease">
-                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 6px var(--ok)"></span>
-                  <strong style="font-size:.82rem;letter-spacing:.04em">🔘 KY-040 ENCODER PUSH SWITCH (CLICK TO RUN / PAUSE)</strong>
+                        style="width:100%;max-width:380px;padding:12px 18px;background:linear-gradient(180deg, var(--surface) 0%, var(--surface-alt) 100%);border:2px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:var(--shadow);cursor:pointer;transition:all .15s ease">
+                  <span id="encoderBtnDot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 6px var(--ok);flex-shrink:0"></span>
+                  <strong style="font-size:.82rem;letter-spacing:.04em;color:var(--ink)">KY-040 ENCODER PUSH SWITCH (CLICK TO RUN / PAUSE)</strong>
                 </button>
               </div>
 
@@ -2381,13 +2381,44 @@ function updateKPIs(r) {
   }
 }
 
+let trajWindowSeconds = 60;
+
+function renderTrajectoryChart(windowSeconds = trajWindowSeconds) {
+  trajWindowSeconds = windowSeconds;
+  if (!telemetryLog || !telemetryLog.length) return;
+
+  const now = telemetryLog[0].ts ? telemetryLog[0].ts.getTime() : Date.now();
+  const cutoff = now - (windowSeconds * 1000);
+
+  // telemetryLog is newest-first, so filter and reverse for chronological display
+  let slice = telemetryLog.filter(r => r.ts && (r.ts.getTime() >= cutoff || windowSeconds >= 900));
+  if (slice.length < 5 && telemetryLog.length) {
+    slice = telemetryLog.slice(0, Math.min(windowSeconds, telemetryLog.length));
+  } else if (slice.length > windowSeconds) {
+    slice = slice.slice(0, windowSeconds);
+  }
+  slice = slice.slice().reverse();
+
+  trajData.labels = slice.map(r => timeStr(r.ts));
+  trajData.health = slice.map(r => r.health);
+  trajData.rul_norm = slice.map(r => Math.min(100, Math.max(0, +((r.rulHours / 20.0) * 100).toFixed(1))));
+
+  trajChart.data.labels = trajData.labels;
+  trajChart.data.datasets[0].data = trajData.health;
+  trajChart.data.datasets[1].data = trajData.rul_norm;
+  trajChart.update();
+}
+
 function updateTrajectory(r) {
   const label = timeStr(r.ts);
   trajData.labels.push(label);
   trajData.health.push(r.health);
   trajData.rul_norm.push(Math.min(100, Math.max(0, +( (r.rulHours / 20.0) * 100 ).toFixed(1))));
-  if (trajData.labels.length > MAX_TRAJ) {
-    trajData.labels.shift(); trajData.health.shift(); trajData.rul_norm.shift();
+  const maxPts = trajWindowSeconds || 60;
+  while (trajData.labels.length > maxPts) {
+    trajData.labels.shift();
+    trajData.health.shift();
+    trajData.rul_norm.shift();
   }
   trajChart.update();
 }
@@ -2682,16 +2713,111 @@ function buildReportsTable() {
     <td>${rep.anomalies > 15 ? `<span class="badge badge-danger">${rep.anomalies}</span>` : rep.anomalies > 5 ? `<span class="badge badge-hazard">${rep.anomalies}</span>` : `<span class="badge badge-ok">${rep.anomalies}</span>`}</td>
     <td class="mono" style="color:${rep.avgHealth>80?'var(--ok)':rep.avgHealth>60?'var(--hazard)':'var(--danger)'};font-weight:600">${rep.avgHealth}%</td>
     <td style="text-align:right;white-space:nowrap">
-      <button class="btn btn-outline btn-sm" onclick="alert('Download report: ${rep.name}')"><i data-lucide="download"></i> Download</button>
+      <button class="btn btn-outline btn-sm" onclick="downloadReport('${rep.name}')"><i data-lucide="download"></i> Download</button>
     </td>
   </tr>`).join('');
   document.getElementById('repAnomTotal').textContent = alertHistory.length + reports.slice(1).reduce((s,r)=>s+r.anomalies,0);
+  if (window.lucide) lucide.createIcons();
+}
+
+function downloadReport(name) {
+  if (name.includes('Technical') || name.includes('Official')) {
+    window.open('/reports/PROJECT_TECHNICAL_REPORT.pdf', '_blank');
+    return;
+  }
+  generateAndDownloadReportFile(name);
 }
 
 function generateReport() {
-  const n = { name: 'Generated Report', period: new Date().toLocaleDateString(), date: new Date().toISOString().slice(0,10), anomalies: alertHistory.length, avgHealth: telemetryLog.length ? +(telemetryLog.reduce((s,r)=>s+r.health,0)/telemetryLog.length).toFixed(1) : 0 };
+  const repName = `Automated Health Diagnostic Audit (${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})`;
+  const n = {
+    name: repName,
+    period: 'Current Session',
+    date: new Date().toISOString().slice(0, 10),
+    anomalies: alertHistory.length,
+    avgHealth: telemetryLog.length ? +(telemetryLog.reduce((s, r) => s + r.health, 0) / telemetryLog.length).toFixed(1) : 98.0
+  };
   REPORT_TEMPLATES.unshift(n);
   buildReportsTable();
+  generateAndDownloadReportFile(repName);
+}
+
+function generateAndDownloadReportFile(name = 'SCADA Diagnostic Report') {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const latest = telemetryLog[0] || {};
+  const avgHealth = telemetryLog.length ? +(telemetryLog.reduce((s,r)=>s+r.health,0)/telemetryLog.length).toFixed(1) : 98.0;
+  const avgRul = telemetryLog.length ? +(telemetryLog.reduce((s,r)=>s+r.rulHours,0)/telemetryLog.length).toFixed(2) : 12.5;
+
+  const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${name} - EquipmentHealth Prognostics</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px; color: #1e293b; line-height: 1.5; background: #faf9f7; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 24px; }
+    h1 { color: #0f172a; margin: 0 0 4px 0; font-size: 1.6rem; }
+    .sub { color: #64748b; font-size: 0.85rem; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 20px 0; }
+    .kpi { padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .kpi-title { font-size: 0.72rem; color: #64748b; text-transform: uppercase; font-weight: bold; letter-spacing: 0.05em; }
+    .kpi-val { font-size: 1.7rem; font-weight: 800; margin-top: 4px; color: #0f172a; font-family: monospace; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 0.85rem; }
+    th, td { padding: 9px 12px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+    th { background: #f1f5f9; font-weight: 600; color: #475569; }
+    .status-badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 0.75rem; font-weight: bold; background: #dcfce7; color: #166534; }
+    @media print { body { margin: 10px; background: #fff; } .card { box-shadow: none; border: none; padding: 0; } button { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;padding-bottom:16px">
+      <div>
+        <h1>${name}</h1>
+        <div class="sub">Equipment: RS-380 Motor Test Rig | Node: RS380-MOT-01 | Generated: ${new Date().toLocaleString()}</div>
+      </div>
+      <button onclick="window.print()" style="padding:9px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:0.85rem">Print / Save as PDF</button>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-title">Average Health Index</div><div class="kpi-val" style="color:#16a34a">${avgHealth}%</div></div>
+      <div class="kpi"><div class="kpi-title">Estimated RUL</div><div class="kpi-val" style="color:#2563eb">${avgRul} h</div></div>
+      <div class="kpi"><div class="kpi-title">Recorded Anomalies</div><div class="kpi-val" style="color:#d97706">${alertHistory.length}</div></div>
+      <div class="kpi"><div class="kpi-title">Active Battery Tap</div><div class="kpi-val">${latest.vals ? latest.vals.totalVoltage : 12.0} V</div></div>
+    </div>
+    <h3 style="margin-top:24px;font-size:1.1rem;color:#0f172a">Telemetry Snapshot (${Math.min(50, telemetryLog.length)} Latest Records)</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th><th>Vibration (g)</th><th>Temp (°C)</th><th>I_total (A)</th><th>I_motor (A)</th><th>V_total (V)</th><th>Health Index</th><th>RUL</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${telemetryLog.slice(0, 50).map(r => `
+          <tr>
+            <td style="font-family:monospace">${timeStr(r.ts)}</td>
+            <td style="font-family:monospace">${fmt(r.vals.vibX, 3)}</td>
+            <td style="font-family:monospace">${fmt(r.vals.temp, 1)}</td>
+            <td style="font-family:monospace">${fmt(r.vals.totalCurrent, 3)}</td>
+            <td style="font-family:monospace">${fmt(r.vals.motorCurrent, 3)}</td>
+            <td style="font-family:monospace">${fmt(r.vals.totalVoltage, 2)}</td>
+            <td style="font-weight:600;color:${r.health > 70 ? '#16a34a' : '#d97706'}">${fmt(r.health, 1)}%</td>
+            <td style="font-family:monospace">${r.rulHours} h</td>
+            <td><span class="status-badge">${r.status}</span></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>`;
+
+  const blob = new Blob([htmlContent], { type: 'text/html' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${name.replace(/[^a-zA-Z0-9_-]/g, '_')}_${ts}.html`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 let totalHistorianRows = 0;
@@ -2786,6 +2912,7 @@ async function loadHistoricalTelemetry() {
       buildAuditTable();
       buildReportsTable();
       refreshSysInfo();
+      renderTrajectoryChart(trajWindowSeconds);
     }
   } catch (err) {
     console.warn('Historical telemetry fetch failed:', err);
@@ -2906,12 +3033,116 @@ function toggleStream(btn) {
   pill.className = streaming ? 'live-pill is-live' : 'live-pill is-off';
 }
 
-// ─────────── TRAJECTORY RANGE ───────────
-document.getElementById('trajRangeGroup').addEventListener('click', e => {
-  const btn = e.target.closest('.range-btn');
-  if (!btn) return;
-  document.querySelectorAll('#trajRangeGroup .range-btn').forEach(b => b.classList.toggle('is-active', b === btn));
-});
+// ─────────── TRAJECTORY RANGE (1 MIN, 5 MIN, 15 MIN) ───────────
+const trajRangeEl = document.getElementById('trajRangeGroup');
+if (trajRangeEl) {
+  trajRangeEl.addEventListener('click', e => {
+    const btn = e.target.closest('.range-btn');
+    if (!btn) return;
+    document.querySelectorAll('#trajRangeGroup .range-btn').forEach(b => b.classList.toggle('is-active', b === btn));
+    const w = parseInt(btn.dataset.w, 10) || 60;
+    renderTrajectoryChart(w);
+  });
+}
+
+// ─────────── OVERVIEW RANGE FILTER (LIVE, 1 HR, 24 HRS) ───────────
+let overviewRangeMode = 'live';
+
+async function setOverviewRange(mode) {
+  overviewRangeMode = mode;
+  document.querySelectorAll('#overviewRangeGroup .range-btn').forEach(b => {
+    b.classList.toggle('is-active', b.dataset.w === mode);
+  });
+
+  const sub = document.querySelector('#sec-overview p');
+
+  if (mode === 'live') {
+    if (sub) sub.innerHTML = '<i data-lucide="info"></i> Continuous SCADA Telemetry &amp; RUL Prognostics — streaming @ 2 Hz.';
+    if (window.lucide) lucide.createIcons();
+    populateOverviewTableFromHistory();
+    return;
+  }
+
+  if (mode === '1h') {
+    if (sub) sub.innerHTML = '<i data-lucide="clock"></i> Past 1 Hour SCADA Window — aggregated statistics &amp; historical telemetry feed.';
+    if (window.lucide) lucide.createIcons();
+    const oneHourAgo = Date.now() - 3600 * 1000;
+    let slice = telemetryLog.filter(r => r.ts && r.ts.getTime() >= oneHourAgo);
+    if (!slice.length) slice = telemetryLog.slice(0, 60);
+    renderOverviewSlice(slice, '1 Hour');
+    return;
+  }
+
+  if (mode === '24h') {
+    if (sub) sub.innerHTML = '<i data-lucide="calendar"></i> Past 24 Hours SCADA Archive — SQLite Historian full logged dataset.';
+    if (window.lucide) lucide.createIcons();
+    if (telemetryLog.length < 150) {
+      try {
+        const res = await fetch('/api/history?limit=300');
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+          const fetched = json.data.map(convertDbRowToRecord);
+          renderOverviewSlice(fetched, '24 Hours');
+          return;
+        }
+      } catch (err) { console.warn(err); }
+    }
+    renderOverviewSlice(telemetryLog, '24 Hours');
+  }
+}
+
+function renderOverviewSlice(records, label) {
+  const body = document.getElementById('logBody');
+  if (!body || !records.length) return;
+  body.innerHTML = '';
+  records.slice(0, MAX_LOG_ROWS).forEach(r => {
+    const badge = r.health > 70
+      ? `<span class="badge badge-ok">Normal</span>`
+      : r.health > 40
+      ? `<span class="badge badge-hazard">Warning</span>`
+      : `<span class="badge badge-danger">Critical</span>`;
+    const healthColor = r.health > 70 ? 'var(--ok)' : r.health > 40 ? 'var(--hazard)' : 'var(--danger)';
+    const cellSummary = `${fmt(r.vals.cell1,2)}|${fmt(r.vals.cell2,2)}|${fmt(r.vals.cell3,2)}`;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="white-space:nowrap;color:var(--muted);font-size:.8rem">${timeStr(r.ts)}</td>
+      <td class="mono">${fmt(r.vals.vibX,3)}</td>
+      <td class="mono">${fmt(r.vals.vibY,3)}</td>
+      <td class="mono">${fmt(r.vals.vibZ,3)}</td>
+      <td class="mono">${fmt(r.vals.temp,1)}</td>
+      <td class="mono" style="font-weight:600">${fmt(r.vals.totalCurrent,3)}</td>
+      <td class="mono" style="color:var(--accent);font-weight:600">${fmt(r.vals.motorCurrent,3)}</td>
+      <td class="mono">${fmt(r.vals.totalVoltage,2)}</td>
+      <td class="mono" style="color:var(--info);font-weight:600">${fmt(r.vals.motorVoltage,2)}</td>
+      <td class="mono" style="font-size:.72rem">${cellSummary}</td>
+      <td class="mono" style="color:${healthColor};font-weight:600">${fmt(r.health,1)}%</td>
+      <td class="mono">${r.rulHours}</td>
+      <td>${badge}</td>`;
+    body.appendChild(tr);
+  });
+
+  const countEl = document.getElementById('logCount');
+  if (countEl) countEl.textContent = `${records.length} records (${label})`;
+
+  // Update summary KPI averages for that historical window
+  const avgHealth = +(records.reduce((s, r) => s + r.health, 0) / records.length).toFixed(1);
+  const avgRul = +(records.reduce((s, r) => s + r.rulHours, 0) / records.length).toFixed(2);
+  const mHealth = document.getElementById('mHealthIdx');
+  if (mHealth) mHealth.textContent = avgHealth + '%';
+  const mRul = document.getElementById('mRul');
+  if (mRul) mRul.textContent = avgRul + ' h';
+  const mFoot = document.getElementById('mHealthFoot');
+  if (mFoot) mFoot.textContent = `${label} historical window average`;
+}
+
+const overviewRangeEl = document.getElementById('overviewRangeGroup');
+if (overviewRangeEl) {
+  overviewRangeEl.addEventListener('click', e => {
+    const btn = e.target.closest('.range-btn');
+    if (!btn) return;
+    setOverviewRange(btn.dataset.w);
+  });
+}
 
 // ─────────── ALERT KIND FILTER ───────────
 document.getElementById('alertKindGroup').addEventListener('click', e => {
