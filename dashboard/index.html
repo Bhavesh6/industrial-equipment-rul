@@ -1706,82 +1706,444 @@
       <!-- ════════════ SECTION: CALIBRATION ════════════ -->
       <section class="page-section" id="sec-calibration">
 
-        <div class="grid-2 mb-5">
-          <!-- Sensor thresholds -->
-          <section class="card">
-            <div class="card-head">
-              <span class="card-title"><i data-lucide="sliders-horizontal"></i> Sensor Thresholds</span>
-            </div>
-            <div class="card-body">
-              <p style="font-size:.82rem;color:var(--muted);margin:0 0 14px">
-                Adjust alarm thresholds for each sensor channel. Changes take effect immediately.
-              </p>
-              <div id="thresholdList">
-                <div class="req-item is-on" onclick="this.classList.toggle('is-on')">
-                  <input type="checkbox" checked>
-                  <div>
-                    <span class="req-name">Vibration X alarm at 2.5 g</span>
-                    <span class="req-note">Triggers critical alert above this RMS threshold</span>
-                  </div>
-                </div>
-                <div class="req-item is-on" onclick="this.classList.toggle('is-on')">
-                  <input type="checkbox" checked>
-                  <div>
-                    <span class="req-name">Temperature alarm at 85 °C</span>
-                    <span class="req-note">Motor thermal protection threshold</span>
-                  </div>
-                </div>
-                <div class="req-item is-on" onclick="this.classList.toggle('is-on')">
-                  <input type="checkbox" checked>
-                  <div>
-                    <span class="req-name">Current alarm at 4.5 A</span>
-                    <span class="req-note">Winding insulation degradation indicator</span>
-                  </div>
-                </div>
-                <div class="req-item" onclick="this.classList.toggle('is-on')">
-                  <input type="checkbox">
-                  <div>
-                    <span class="req-name">Kurtosis alarm at 5.0</span>
-                    <span class="req-note">Impulsive bearing fault detection</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- Model confidence -->
-          <section class="card">
-            <div class="card-head">
-              <span class="card-title"><i data-lucide="cpu"></i> Model Sensitivity</span>
-            </div>
-            <div class="card-body">
-              <p style="font-size:.82rem;color:var(--muted);margin:0 0 18px">
-                Adjust how aggressively the prognostics model flags anomalies. Higher = more sensitive.
-              </p>
-              <label class="field-label">Anomaly Sensitivity</label>
-              <div class="slider-row">
-                <input type="range" id="sensRange" min="10" max="90" step="5" value="50" oninput="document.getElementById('sensVal').textContent=this.value+'%'">
-                <span class="slider-val" id="sensVal">50%</span>
-              </div>
-              <div class="scale"><span>10% — strict</span><span>90% — aggressive</span></div>
-
-              <div style="margin-top:20px">
-                <label class="field-label">Health Decay Window (days)</label>
-                <div class="slider-row">
-                  <input type="range" id="decayRange" min="3" max="30" step="1" value="7" oninput="document.getElementById('decayVal').textContent=this.value+'d'">
-                  <span class="slider-val" id="decayVal">7d</span>
-                </div>
-                <div class="scale"><span>3 days — responsive</span><span>30 days — stable</span></div>
-              </div>
-            </div>
-          </section>
+        <!-- Top sub-header bar -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
+          <div>
+            <p style="font-size:.82rem;color:var(--faint);margin:0;display:flex;align-items:center;gap:6px">
+              <i data-lucide="shield-alert" style="width:16px;height:16px;color:var(--accent)"></i>
+              Safety Interlock Trip Policies &bull; Sensor Calibration Studio &bull; Hardware Protection Watchdog
+            </p>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="badge badge-ok" id="calibSyncBadge">PROTECTION WATCHDOG ACTIVE</span>
+            <button type="button" class="btn btn-outline btn-sm" onclick="recalibrateZero()" title="Zero-calibrate current sensors while motor idle">
+              <i data-lucide="target"></i> Zero Current Sensors
+            </button>
+          </div>
         </div>
 
+        <!-- Live Trip & Limit Summary Rail -->
+        <div class="metrics mb-5">
+          <div class="metric" style="--m-accent: var(--danger)">
+            <div class="metric-label"><i data-lucide="zap"></i> Current Trip</div>
+            <div class="metric-value mono" id="kpiCalibCurrTrip">4.50 A</div>
+            <div class="metric-foot">Motor Armature Cutoff</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--hazard)">
+            <div class="metric-label"><i data-lucide="activity"></i> Vibration Trip</div>
+            <div class="metric-value mono" id="kpiCalibVibTrip">2.50 g</div>
+            <div class="metric-foot">ISO Severe Dynamic Limit</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--danger)">
+            <div class="metric-label"><i data-lucide="thermometer"></i> Thermal Cutoff</div>
+            <div class="metric-value mono" id="kpiCalibTempTrip">85.0 °C</div>
+            <div class="metric-foot">Critical Core Overtemp</div>
+          </div>
+          <div class="metric" style="--m-accent: var(--info)">
+            <div class="metric-label"><i data-lucide="battery"></i> BMS Cell Cutoff</div>
+            <div class="metric-value mono" id="kpiCalibBmsTrip">2.80 V</div>
+            <div class="metric-foot">3S Li-ion Min Cell Voltage</div>
+          </div>
+        </div>
+
+        <!-- Comprehensive 6-Card Calibration Studio Grid -->
+        <div class="grid-2 mb-5">
+
+          <!-- Card 1: Over-Current Protection & Sensor Calibration -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="zap"></i> Current Protection &amp; ACS712 Sensor Calibration</span>
+              <span class="badge badge-danger">Safety Critical</span>
+            </div>
+            <div class="card-body">
+              <div class="calib-group">
+                <!-- Motor Overcurrent Trip -->
+                <div class="calib-row is-trip">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="alert-octagon"></i> Motor Overcurrent Trip Limit</span>
+                    <span class="calib-val-badge" id="badge_currMotorTrip">4.50 A</span>
+                  </div>
+                  <div class="calib-sub">Instantaneous emergency motor shutoff if armature draw exceeds this threshold for &gt;150 ms.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_currMotorTrip" min="1.0" max="6.0" step="0.1" value="4.5" oninput="onCalibChange('currMotorTrip', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_currMotorTrip" min="1.0" max="6.0" step="0.1" value="4.5" oninput="onCalibChange('currMotorTrip', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>1.0 A (Strict)</span><span>4.5 A (Nominal)</span><span>6.0 A (Max)</span></div>
+                </div>
+
+                <!-- Total Bus Overcurrent Trip -->
+                <div class="calib-row is-trip">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="shield-alert"></i> Total Bus Overcurrent Cutoff</span>
+                    <span class="calib-val-badge" id="badge_currTotalTrip">5.50 A</span>
+                  </div>
+                  <div class="calib-sub">Total 3S battery bus current ceiling; protects lithium cells, BMS wiring, and power harness.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_currTotalTrip" min="2.0" max="8.0" step="0.1" value="5.5" oninput="onCalibChange('currTotalTrip', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_currTotalTrip" min="2.0" max="8.0" step="0.1" value="5.5" oninput="onCalibChange('currTotalTrip', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>2.0 A</span><span>5.5 A</span><span>8.0 A</span></div>
+                </div>
+
+                <!-- Motor Current Warning Level -->
+                <div class="calib-row is-warn">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="alert-triangle"></i> Motor Current Warning Level</span>
+                    <span class="calib-val-badge" id="badge_currWarn">3.20 A</span>
+                  </div>
+                  <div class="calib-sub">Pre-trip alert threshold; indicates mechanical binding, heavy friction, or abnormal brush wear.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_currWarn" min="1.0" max="4.5" step="0.1" value="3.2" oninput="onCalibChange('currWarn', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_currWarn" min="1.0" max="4.5" step="0.1" value="3.2" oninput="onCalibChange('currWarn', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>1.0 A</span><span>3.2 A</span><span>4.5 A</span></div>
+                </div>
+
+                <!-- ACS712 Zero-Point Calibration -->
+                <div class="calib-row is-tune">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="target"></i> ACS712 Zero-Current Offset</span>
+                    <span class="calib-val-badge" id="badge_currZeroOffset">2.500 V</span>
+                  </div>
+                  <div class="calib-sub">Quiescent output voltage (Vcc/2) when motor is idle. Recalibrate zero if ambient drift occurs.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_currZeroOffset" min="2.300" max="2.700" step="0.005" value="2.500" oninput="onCalibChange('currZeroOffset', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_currZeroOffset" min="2.300" max="2.700" step="0.005" value="2.500" oninput="onCalibChange('currZeroOffset', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>2.30 V</span><span>2.50 V (Vcc/2)</span><span>2.70 V</span></div>
+                </div>
+
+                <!-- ACS712 Sensitivity (V/A) -->
+                <div class="calib-row is-tune">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="sliders"></i> Current Sensitivity Factor</span>
+                    <span class="calib-val-badge" id="badge_currSensitivity">0.100 V/A</span>
+                  </div>
+                  <div class="calib-sub">Sensor transfer scale (0.100 V/A for ACS712-20A; 0.185 V/A for ACS712-05A; 0.066 V/A for 30A).</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_currSensitivity" min="0.050" max="0.200" step="0.005" value="0.100" oninput="onCalibChange('currSensitivity', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_currSensitivity" min="0.050" max="0.200" step="0.005" value="0.100" oninput="onCalibChange('currSensitivity', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>0.050 V/A</span><span>0.100 V/A</span><span>0.200 V/A</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Card 2: Dynamic Vibration Severity (ISO 10816-3) -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="activity"></i> Vibration Dynamics &amp; Rotor Balancer</span>
+              <span class="badge badge-hazard">ISO 10816-3</span>
+            </div>
+            <div class="card-body">
+              <div class="calib-group">
+                <!-- Vibration Emergency Trip -->
+                <div class="calib-row is-trip">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="alert-octagon"></i> Vibration Emergency Trip (g)</span>
+                    <span class="calib-val-badge" id="badge_vibTrip">2.50 g</span>
+                  </div>
+                  <div class="calib-sub">Critical machine protection trip; shuts down drive if severe rotor imbalance or impact occurs.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_vibTrip" min="1.0" max="5.0" step="0.05" value="2.50" oninput="onCalibChange('vibTrip', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_vibTrip" min="1.0" max="5.0" step="0.05" value="2.50" oninput="onCalibChange('vibTrip', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>1.00 g</span><span>2.50 g (Emergency Cutoff)</span><span>5.00 g</span></div>
+                </div>
+
+                <!-- Vibration Warning Level -->
+                <div class="calib-row is-warn">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="alert-triangle"></i> ISO Class 1 Warning Level (g)</span>
+                    <span class="calib-val-badge" id="badge_vibWarn">0.71 g</span>
+                  </div>
+                  <div class="calib-sub">ISO 10816-3 Zone C boundary. Triggers predictive maintenance notice without stopping motor.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_vibWarn" min="0.30" max="1.50" step="0.02" value="0.71" oninput="onCalibChange('vibWarn', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_vibWarn" min="0.30" max="1.50" step="0.02" value="0.71" oninput="onCalibChange('vibWarn', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>0.30 g (Zone A)</span><span>0.71 g (Zone C)</span><span>1.50 g (Zone D)</span></div>
+                </div>
+
+                <!-- Kurtosis Shock Limit -->
+                <div class="calib-row is-warn">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="zap"></i> Kurtosis Impulsive Shock Trip (&beta;<sub>2</sub>)</span>
+                    <span class="calib-val-badge" id="badge_kurtTrip">5.00</span>
+                  </div>
+                  <div class="calib-sub">Bearing raceway spalling and shock detection threshold. Baseline Gaussian vibration = 3.0.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_kurtTrip" min="3.0" max="8.0" step="0.1" value="5.00" oninput="onCalibChange('kurtTrip', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_kurtTrip" min="3.0" max="8.0" step="0.1" value="5.00" oninput="onCalibChange('kurtTrip', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>3.0 (Gaussian Normal)</span><span>5.0 (Defect Alert)</span><span>8.0 (Severe Chipping)</span></div>
+                </div>
+
+                <!-- Radial / Axial Imbalance Ratio -->
+                <div class="calib-row is-tune">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="compass"></i> Radial / Axial Imbalance Ratio</span>
+                    <span class="calib-val-badge" id="badge_vibAxialRatio">1.20</span>
+                  </div>
+                  <div class="calib-sub">Maximum allowed ratio between radial (X) and axial (Y) RMS acceleration before flagging shaft cocking.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_vibAxialRatio" min="0.80" max="2.50" step="0.05" value="1.20" oninput="onCalibChange('vibAxialRatio', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_vibAxialRatio" min="0.80" max="2.50" step="0.05" value="1.20" oninput="onCalibChange('vibAxialRatio', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>0.80</span><span>1.20 (Standard)</span><span>2.50</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Card 3: Thermal Protection & Overheat Cutoff -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="thermometer"></i> Thermal Protection &amp; Overheat Cutoff</span>
+              <span class="badge badge-danger">Class B Insulation</span>
+            </div>
+            <div class="card-body">
+              <div class="calib-group">
+                <!-- Critical Thermal Cutoff -->
+                <div class="calib-row is-trip">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="flame"></i> Critical Motor Thermal Cutoff (&deg;C)</span>
+                    <span class="calib-val-badge" id="badge_tempTrip">85.0 °C</span>
+                  </div>
+                  <div class="calib-sub">Thermal overload trip; immediately disengages L298N drive to prevent armature enamel degradation.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_tempTrip" min="50.0" max="100.0" step="1.0" value="85.0" oninput="onCalibChange('tempTrip', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_tempTrip" min="50.0" max="100.0" step="1.0" value="85.0" oninput="onCalibChange('tempTrip', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>50 °C</span><span>85 °C (Class B Limit)</span><span>100 °C</span></div>
+                </div>
+
+                <!-- Thermal Warning Level -->
+                <div class="calib-row is-warn">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="sun"></i> Motor Thermal Warning Level (&deg;C)</span>
+                    <span class="calib-val-badge" id="badge_tempWarn">55.0 °C</span>
+                  </div>
+                  <div class="calib-sub">Yellow warning status; advisory to reduce test rig continuous PWM duty cycle.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_tempWarn" min="40.0" max="75.0" step="1.0" value="55.0" oninput="onCalibChange('tempWarn', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_tempWarn" min="40.0" max="75.0" step="1.0" value="55.0" oninput="onCalibChange('tempWarn', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>40 °C</span><span>55 °C</span><span>75 °C</span></div>
+                </div>
+
+                <!-- Ambient Thermal Baseline Reference -->
+                <div class="calib-row is-tune">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="cloud"></i> Ambient Reference Baseline (&deg;C)</span>
+                    <span class="calib-val-badge" id="badge_tempAmbient">25.0 °C</span>
+                  </div>
+                  <div class="calib-sub">Ambient baseline temperature used for differential thermal rise (&Delta;T = T<sub>motor</sub> - T<sub>ambient</sub>) calculations.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_tempAmbient" min="15.0" max="40.0" step="0.5" value="25.0" oninput="onCalibChange('tempAmbient', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_tempAmbient" min="15.0" max="40.0" step="0.5" value="25.0" oninput="onCalibChange('tempAmbient', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>15 °C</span><span>25 °C (Standard Lab)</span><span>40 °C</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Card 4: 3S Battery Safety & Virtual BMS Protection -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="battery-charging"></i> 3S Battery Safety &amp; Virtual BMS Cutoffs</span>
+              <span class="badge badge-ok">Li-ion Watchdog</span>
+            </div>
+            <div class="card-body">
+              <div class="calib-group">
+                <!-- Cell Min Cutoff -->
+                <div class="calib-row is-trip">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="battery-warning"></i> Cell Minimum Discharge Cutoff (V)</span>
+                    <span class="calib-val-badge" id="badge_bmsCellMin">2.80 V</span>
+                  </div>
+                  <div class="calib-sub">Virtual BMS trip; automatically stops motor if ANY single 3S cell drops below this cutoff.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_bmsCellMin" min="2.60" max="3.40" step="0.02" value="2.80" oninput="onCalibChange('bmsCellMin', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_bmsCellMin" min="2.60" max="3.40" step="0.02" value="2.80" oninput="onCalibChange('bmsCellMin', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>2.60 V (Deep Cutoff)</span><span>2.80 V (Safe Protection)</span><span>3.40 V (Storage)</span></div>
+                </div>
+
+                <!-- Pack Low Voltage Warning -->
+                <div class="calib-row is-warn">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="battery-low"></i> 3S Pack Low-Voltage Warning (V)</span>
+                    <span class="calib-val-badge" id="badge_bmsPackLow">10.20 V</span>
+                  </div>
+                  <div class="calib-sub">Low battery warning alert (nominal 3S pack = 11.10V; 3.40V/cell average).</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_bmsPackLow" min="9.00" max="11.50" step="0.10" value="10.20" oninput="onCalibChange('bmsPackLow', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_bmsPackLow" min="9.00" max="11.50" step="0.10" value="10.20" oninput="onCalibChange('bmsPackLow', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>9.00 V</span><span>10.20 V</span><span>11.50 V</span></div>
+                </div>
+
+                <!-- Max Allowed Cell Imbalance Delta -->
+                <div class="calib-row is-warn">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="split"></i> Max Cell Imbalance (&Delta;V Limit)</span>
+                    <span class="calib-val-badge" id="badge_bmsDeltaTrip">80 mV</span>
+                  </div>
+                  <div class="calib-sub">Alert triggered when max cell voltage deviation exceeds limit, preventing accelerated cell aging.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_bmsDeltaTrip" min="30" max="200" step="5" value="80" oninput="onCalibChange('bmsDeltaTrip', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_bmsDeltaTrip" min="30" max="200" step="5" value="80" oninput="onCalibChange('bmsDeltaTrip', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>30 mV (Strict)</span><span>80 mV (Nominal)</span><span>200 mV (Degraded)</span></div>
+                </div>
+
+                <!-- Full Charge Alarm Limit -->
+                <div class="calib-row is-tune">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="battery-charging"></i> Full Charge Cutoff Warning (V)</span>
+                    <span class="calib-val-badge" id="badge_bmsPackMax">12.60 V</span>
+                  </div>
+                  <div class="calib-sub">Full charge alert threshold (4.20V per cell * 3 = 12.60V). Unplug charger when reached.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_bmsPackMax" min="12.30" max="12.80" step="0.05" value="12.60" oninput="onCalibChange('bmsPackMax', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_bmsPackMax" min="12.30" max="12.80" step="0.05" value="12.60" oninput="onCalibChange('bmsPackMax', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>12.30 V</span><span>12.60 V (Full 100%)</span><span>12.80 V (Overcharge)</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Card 5: Actuator Drive & Speed Dynamics (L298N) -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="sliders"></i> Actuator Drive Dynamics &amp; PWM Limiter</span>
+              <span class="badge badge-info">5 kHz PWM</span>
+            </div>
+            <div class="card-body">
+              <div class="calib-group">
+                <!-- Maximum Permitted PWM Drive -->
+                <div class="calib-row is-tune">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="gauge"></i> Maximum Allowed PWM Drive</span>
+                    <span class="calib-val-badge" id="badge_pwmMax">255</span>
+                  </div>
+                  <div class="calib-sub">Upper ceiling on PWM speed command to protect mechanical gearing or fragile test attachments.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_pwmMax" min="150" max="255" step="5" value="255" oninput="onCalibChange('pwmMax', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_pwmMax" min="150" max="255" step="5" value="255" oninput="onCalibChange('pwmMax', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>150 (59%)</span><span>200 (78%)</span><span>255 (100% MAX)</span></div>
+                </div>
+
+                <!-- Minimum Startup Break-Away PWM -->
+                <div class="calib-row is-tune">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="play-circle"></i> Minimum Startup Break-Away PWM</span>
+                    <span class="calib-val-badge" id="badge_pwmMin">150</span>
+                  </div>
+                  <div class="calib-sub">Minimum PWM command required to overcome static stiction of the RS-380 armature and sleeve bushings.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_pwmMin" min="100" max="180" step="5" value="150" oninput="onCalibChange('pwmMin', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_pwmMin" min="100" max="180" step="5" value="150" oninput="onCalibChange('pwmMin', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>100</span><span>150 (Break-Away)</span><span>180</span></div>
+                </div>
+
+                <!-- Slew Rate Limiter Ramp Step -->
+                <div class="calib-row is-tune">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="trending-up"></i> Slew-Rate Limiter Ramp Step</span>
+                    <span class="calib-val-badge" id="badge_slewStep">15 PWM/step</span>
+                  </div>
+                  <div class="calib-sub">Ramping increments per interval to prevent sharp inductive kickback and inrush current spikes.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_slewStep" min="5" max="50" step="1" value="15" oninput="onCalibChange('slewStep', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_slewStep" min="5" max="50" step="1" value="15" oninput="onCalibChange('slewStep', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>5 (Gentle)</span><span>15 (Nominal)</span><span>50 (Aggressive)</span></div>
+                </div>
+
+                <!-- Slew Limiting Toggle Checkbox -->
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)">
+                  <span style="font-size:.82rem;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:6px">
+                    <i data-lucide="shield-check" style="width:14px;height:14px;color:var(--ok)"></i> Active Slew-Rate Limiting Protection
+                  </span>
+                  <label style="position:relative;display:inline-block;width:38px;height:22px;margin:0">
+                    <input type="checkbox" id="check_slewEnabled" checked onchange="onCalibToggle('slewEnabled', this.checked)" style="opacity:0;width:0;height:0">
+                    <span style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#2f6b46;border-radius:34px;transition:.2s"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Card 6: AI Prognostics & Anomaly Sensitivity -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title"><i data-lucide="cpu"></i> AI Prognostics &amp; Anomaly Detection Tuning</span>
+              <span class="badge badge-info">TreeSHAP &bull; RF</span>
+            </div>
+            <div class="card-body">
+              <div class="calib-group">
+                <!-- Anomaly Sensitivity -->
+                <div class="calib-row is-tune">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="crosshair"></i> Isolation Forest Anomaly Sensitivity</span>
+                    <span class="calib-val-badge" id="badge_sens">50%</span>
+                  </div>
+                  <div class="calib-sub">ML anomaly detection contamination parameter; higher sensitivity catches earlier subtle sensor deviations.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_sens" min="10" max="90" step="5" value="50" oninput="onCalibChange('sens', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_sens" min="10" max="90" step="5" value="50" oninput="onCalibChange('sens', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>10% (Strict)</span><span>50% (Standard)</span><span>90% (Aggressive)</span></div>
+                </div>
+
+                <!-- Health Decay Window -->
+                <div class="calib-row is-tune">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="clock"></i> Health Index Decay Horizon (Days)</span>
+                    <span class="calib-val-badge" id="badge_decayDays">7 d</span>
+                  </div>
+                  <div class="calib-sub">Rolling exponential moving average decay window for cumulative health and degradation rate.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_decayDays" min="3" max="30" step="1" value="7" oninput="onCalibChange('decayDays', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_decayDays" min="3" max="30" step="1" value="7" oninput="onCalibChange('decayDays', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>3 Days (Fast)</span><span>7 Days (Balanced)</span><span>30 Days (Long-Term)</span></div>
+                </div>
+
+                <!-- RUL Critical Alarm Threshold -->
+                <div class="calib-row is-trip">
+                  <div class="calib-row-head">
+                    <span class="calib-label"><i data-lucide="alert-octagon"></i> Critical RUL Replacement Alarm (Hours)</span>
+                    <span class="calib-val-badge" id="badge_rulCritical">4.0 h</span>
+                  </div>
+                  <div class="calib-sub">Predictive replacement alert dispatched when remaining useful life estimate drops below this point.</div>
+                  <div class="calib-controls">
+                    <input type="range" class="calib-slider" id="slide_rulCritical" min="1.0" max="8.0" step="0.5" value="4.0" oninput="onCalibChange('rulCritical', this.value, 'slide')">
+                    <input type="number" class="calib-input-num mono" id="num_rulCritical" min="1.0" max="8.0" step="0.5" value="4.0" oninput="onCalibChange('rulCritical', this.value, 'num')">
+                  </div>
+                  <div class="calib-scale"><span>1.0 h</span><span>4.0 h (Service Window)</span><span>8.0 h</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+        </div>
+
+        <!-- Sticky Save & Apply Control Bar -->
         <div class="save-bar">
-          <span class="save-note" id="calibSaveNote">No unsaved changes.</span>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-outline btn-sm" onclick="resetCalib()"><i data-lucide="rotate-ccw"></i> Reset to defaults</button>
-            <button class="btn btn-primary btn-sm" onclick="saveCalib()"><i data-lucide="check"></i> Save calibration</button>
+          <div>
+            <span class="save-note" id="calibSaveNote">No unsaved changes &mdash; all protection trip limits active in real time.</span>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button type="button" class="btn btn-outline btn-sm" onclick="resetCalib()"><i data-lucide="rotate-ccw"></i> Reset Factory Defaults</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveCalib()"><i data-lucide="check"></i> Apply &amp; Save Calibration</button>
           </div>
         </div>
       </section>
@@ -1973,6 +2335,7 @@ function navigate(id) {
   }
   if (id === 'prognostics')  refreshPrognostics();
   if (id === 'reports')      buildReportsTable();
+  if (id === 'calibration')  initCalibrationPage();
   if (id === 'audit')        buildAuditTable();
   if (id === 'sysinfo')      refreshSysInfo();
 }
@@ -3227,19 +3590,246 @@ function refreshSysInfo() {
   document.getElementById('sysMemory').textContent = typeof memMB === 'number' ? memMB + ' MB' : memMB;
 }
 
-// ─────────── CALIBRATION ───────────
-function saveCalib() {
-  const note = document.getElementById('calibSaveNote');
-  note.className = 'save-note is-saved';
-  note.textContent = '✓ Calibration saved — taking effect immediately.';
-  setTimeout(() => { note.className = 'save-note'; note.textContent = 'All settings saved.'; }, 3000);
+// ─────────── COMPREHENSIVE CALIBRATION & TRIP CONTROLLER ───────────
+const DEFAULT_CALIBRATION = {
+  currMotorTrip: 4.50,
+  currTotalTrip: 5.50,
+  currWarn: 3.20,
+  currZeroOffset: 2.500,
+  currSensitivity: 0.100,
+  vibTrip: 2.50,
+  vibWarn: 0.71,
+  vibGood: 0.28,
+  vibAxialRatio: 1.20,
+  kurtTrip: 5.00,
+  tempTrip: 85.0,
+  tempWarn: 55.0,
+  tempAmbient: 25.0,
+  bmsCellMin: 2.80,
+  bmsPackLow: 10.20,
+  bmsPackMax: 12.60,
+  bmsDeltaTrip: 80,
+  pwmMax: 255,
+  pwmMin: 150,
+  slewStep: 15,
+  slewEnabled: true,
+  sens: 50,
+  decayDays: 7,
+  rulCritical: 4.0
+};
+
+let activeCalibration = Object.assign({}, DEFAULT_CALIBRATION);
+
+function getActiveCalibration() {
+  return activeCalibration;
 }
+
+const CALIB_UNITS = {
+  currMotorTrip: ' A',
+  currTotalTrip: ' A',
+  currWarn: ' A',
+  currZeroOffset: ' V',
+  currSensitivity: ' V/A',
+  vibTrip: ' g',
+  vibWarn: ' g',
+  vibAxialRatio: '',
+  kurtTrip: '',
+  tempTrip: ' °C',
+  tempWarn: ' °C',
+  tempAmbient: ' °C',
+  bmsCellMin: ' V',
+  bmsPackLow: ' V',
+  bmsPackMax: ' V',
+  bmsDeltaTrip: ' mV',
+  pwmMax: '',
+  pwmMin: '',
+  slewStep: ' PWM/step',
+  sens: '%',
+  decayDays: ' d',
+  rulCritical: ' h'
+};
+
+const CALIB_DECIMALS = {
+  currMotorTrip: 2,
+  currTotalTrip: 2,
+  currWarn: 2,
+  currZeroOffset: 3,
+  currSensitivity: 3,
+  vibTrip: 2,
+  vibWarn: 2,
+  vibAxialRatio: 2,
+  kurtTrip: 2,
+  tempTrip: 1,
+  tempWarn: 1,
+  tempAmbient: 1,
+  bmsCellMin: 2,
+  bmsPackLow: 2,
+  bmsPackMax: 2,
+  bmsDeltaTrip: 0,
+  pwmMax: 0,
+  pwmMin: 0,
+  slewStep: 0,
+  sens: 0,
+  decayDays: 0,
+  rulCritical: 1
+};
+
+function formatCalibVal(key, val) {
+  const dec = CALIB_DECIMALS[key] !== undefined ? CALIB_DECIMALS[key] : 2;
+  const unit = CALIB_UNITS[key] || '';
+  return Number(val).toFixed(dec) + unit;
+}
+
+function initCalibrationPage() {
+  loadCalibrationSettings();
+  syncCalibUIFromState();
+  updateCalibKpiTiles();
+}
+
+function loadCalibrationSettings() {
+  try {
+    const saved = localStorage.getItem('rs380_calibration');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      activeCalibration = Object.assign({}, DEFAULT_CALIBRATION, parsed);
+    }
+  } catch (e) {
+    console.warn('Failed to load local calibration:', e);
+  }
+
+  fetch('/api/calibration')
+    .then(r => r.ok ? r.json() : null)
+    .then(res => {
+      if (res && res.success && res.data) {
+        if (!localStorage.getItem('rs380_calibration')) {
+          activeCalibration = Object.assign({}, DEFAULT_CALIBRATION, res.data);
+          syncCalibUIFromState();
+          updateCalibKpiTiles();
+        }
+      }
+    })
+    .catch(() => {});
+}
+
+function syncCalibUIFromState() {
+  for (const key in activeCalibration) {
+    const val = activeCalibration[key];
+    const slide = document.getElementById('slide_' + key);
+    const num = document.getElementById('num_' + key);
+    const badge = document.getElementById('badge_' + key);
+
+    if (slide) slide.value = val;
+    if (num) num.value = val;
+    if (badge) badge.textContent = formatCalibVal(key, val);
+  }
+
+  const checkSlew = document.getElementById('check_slewEnabled');
+  if (checkSlew) checkSlew.checked = !!activeCalibration.slewEnabled;
+}
+
+function onCalibChange(key, value, origin) {
+  let valNum = parseFloat(value);
+  if (isNaN(valNum)) return;
+
+  activeCalibration[key] = valNum;
+
+  if (origin === 'slide') {
+    const num = document.getElementById('num_' + key);
+    if (num) num.value = valNum;
+  } else if (origin === 'num') {
+    const slide = document.getElementById('slide_' + key);
+    if (slide) slide.value = valNum;
+  }
+
+  const badge = document.getElementById('badge_' + key);
+  if (badge) badge.textContent = formatCalibVal(key, valNum);
+
+  const note = document.getElementById('calibSaveNote');
+  if (note) {
+    note.className = 'save-note is-dirty';
+    note.textContent = '● Unsaved changes pending — click Apply & Save to activate.';
+  }
+
+  updateCalibKpiTiles();
+}
+
+function onCalibToggle(key, checked) {
+  activeCalibration[key] = !!checked;
+  const note = document.getElementById('calibSaveNote');
+  if (note) {
+    note.className = 'save-note is-dirty';
+    note.textContent = '● Unsaved changes pending — click Apply & Save to activate.';
+  }
+}
+
+function updateCalibKpiTiles() {
+  const kpiCurr = document.getElementById('kpiCalibCurrTrip');
+  const kpiVib  = document.getElementById('kpiCalibVibTrip');
+  const kpiTemp = document.getElementById('kpiCalibTempTrip');
+  const kpiBms  = document.getElementById('kpiCalibBmsTrip');
+
+  if (kpiCurr) kpiCurr.textContent = formatCalibVal('currMotorTrip', activeCalibration.currMotorTrip);
+  if (kpiVib)  kpiVib.textContent  = formatCalibVal('vibTrip', activeCalibration.vibTrip);
+  if (kpiTemp) kpiTemp.textContent = formatCalibVal('tempTrip', activeCalibration.tempTrip);
+  if (kpiBms)  kpiBms.textContent  = formatCalibVal('bmsCellMin', activeCalibration.bmsCellMin);
+}
+
+async function saveCalib() {
+  try {
+    localStorage.setItem('rs380_calibration', JSON.stringify(activeCalibration));
+
+    await fetch('/api/calibration', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(activeCalibration)
+    }).catch(e => console.warn('Backend calibration sync note:', e));
+
+    const note = document.getElementById('calibSaveNote');
+    if (note) {
+      note.className = 'save-note is-saved';
+      note.textContent = '✓ Calibration & trip limits saved — active in real-time across all systems.';
+      setTimeout(() => {
+        note.className = 'save-note';
+        note.textContent = 'No unsaved changes — all protection trip limits active in real time.';
+      }, 3500);
+    }
+
+    updateCalibKpiTiles();
+  } catch (err) {
+    alert('Failed to save calibration: ' + err);
+  }
+}
+
 function resetCalib() {
-  document.getElementById('sensRange').value = 50;
-  document.getElementById('sensVal').textContent = '50%';
-  document.getElementById('decayRange').value = 7;
-  document.getElementById('decayVal').textContent = '7d';
-  document.getElementById('calibSaveNote').textContent = 'Restored to defaults.';
+  if (!confirm('Reset all calibration parameters and safety trip limits to factory defaults?')) return;
+  activeCalibration = Object.assign({}, DEFAULT_CALIBRATION);
+  localStorage.removeItem('rs380_calibration');
+  syncCalibUIFromState();
+  updateCalibKpiTiles();
+  saveCalib();
+
+  const note = document.getElementById('calibSaveNote');
+  if (note) {
+    note.className = 'save-note is-saved';
+    note.textContent = '✓ Restored all factory default safety trip thresholds.';
+  }
+}
+
+let _lastAutoTripTime = 0;
+function triggerAutoSafetyCutoff(reason) {
+  if (Date.now() - _lastAutoTripTime < 4000) return;
+  _lastAutoTripTime = Date.now();
+
+  if (motorControlState.running) {
+    sendMotorCmd('stop');
+    const toast = document.createElement('div');
+    toast.className = 'trip-toast';
+    toast.style = 'position:fixed;bottom:24px;right:24px;background:#dc2626;color:#fff;padding:14px 20px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);z-index:99999;font-weight:700;display:flex;align-items:center;gap:10px;animation:slide-up .25s ease';
+    toast.innerHTML = `<i data-lucide="octagon-alert"></i> <span>SAFETY TRIP ENGAGED: ${reason}. Motor stopped.</span>`;
+    document.body.appendChild(toast);
+    if (window.lucide) lucide.createIcons();
+    setTimeout(() => toast.remove(), 5000);
+  }
 }
 
 // ─────────── EXPORT CSV ───────────
@@ -4011,14 +4601,46 @@ function transformHardwareTelemetry(hw, pred) {
 
   let severity = null, event = null;
   const alertStr = hw.alert || 'NONE';
+  const cal = getActiveCalibration();
+
+  // 1. HARDWARE / FIRMWARE REPORTED TRIPS
   if (alertStr === 'OVERCURRENT_TRIP') {
-    status = 'CRITICAL'; severity = 'critical'; event = 'Overcurrent Trip Triggered (>5A)';
+    status = 'CRITICAL'; severity = 'critical'; event = 'Hardware Overcurrent Trip Triggered (>5A)';
   } else if (alertStr === 'MANUAL_ESTOP') {
     status = 'CRITICAL'; severity = 'critical'; event = 'Emergency Stop (E-STOP) Engaged';
   } else if (alertStr === 'VIBRATION_HIGH') {
     status = 'WARNING'; severity = 'warning'; event = 'High Vibration Anomaly Detected';
   } else if (alertStr === 'OVERTEMP_TRIP') {
     status = 'CRITICAL'; severity = 'critical'; event = 'Overtemperature Trip Triggered (>80°C)';
+  }
+  // 2. REAL-TIME CALIBRATION TRIP LIMITS (SAFETY INTERLOCKS)
+  else if (vals.motorCurrent >= cal.currMotorTrip) {
+    status = 'CRITICAL'; severity = 'critical'; event = `Motor Overcurrent Trip (${fmt(vals.motorCurrent, 2)} A >= ${fmt(cal.currMotorTrip, 2)} A limit)`;
+    triggerAutoSafetyCutoff('Motor Overcurrent Trip');
+  } else if (vals.totalCurrent >= cal.currTotalTrip) {
+    status = 'CRITICAL'; severity = 'critical'; event = `Total Bus Overcurrent Trip (${fmt(vals.totalCurrent, 2)} A >= ${fmt(cal.currTotalTrip, 2)} A limit)`;
+    triggerAutoSafetyCutoff('Total Bus Overcurrent Trip');
+  } else if (vals.vibX >= cal.vibTrip) {
+    status = 'CRITICAL'; severity = 'critical'; event = `Vibration Trip Exceeded (${fmt(vals.vibX, 2)} g >= ${fmt(cal.vibTrip, 2)} g limit)`;
+    triggerAutoSafetyCutoff('Emergency Vibration Trip');
+  } else if (vals.temp >= cal.tempTrip) {
+    status = 'CRITICAL'; severity = 'critical'; event = `Critical Overtemperature Trip (${fmt(vals.temp, 1)} °C >= ${fmt(cal.tempTrip, 1)} °C limit)`;
+    triggerAutoSafetyCutoff('Critical Thermal Cutoff');
+  } else if (vals.cell1 < cal.bmsCellMin || vals.cell2 < cal.bmsCellMin || vals.cell3 < cal.bmsCellMin) {
+    status = 'CRITICAL'; severity = 'critical'; event = `BMS Cell Under-Voltage Cutoff (<${fmt(cal.bmsCellMin, 2)} V/cell)`;
+    triggerAutoSafetyCutoff('Virtual BMS Cutoff');
+  }
+  // 3. WARNING LEVEL THRESHOLDS
+  else if (vals.motorCurrent >= cal.currWarn) {
+    status = 'WARNING'; severity = 'warning'; event = `High Motor Current Warning (${fmt(vals.motorCurrent, 2)} A >= ${fmt(cal.currWarn, 2)} A)`;
+  } else if (vals.vibX >= cal.vibWarn) {
+    status = 'WARNING'; severity = 'warning'; event = `Vibration Warning (${fmt(vals.vibX, 2)} g >= ${fmt(cal.vibWarn, 2)} g)`;
+  } else if (vals.temp >= cal.tempWarn) {
+    status = 'WARNING'; severity = 'warning'; event = `Elevated Temperature Warning (${fmt(vals.temp, 1)} °C >= ${fmt(cal.tempWarn, 1)} °C)`;
+  } else if (vals.cellDeltaMv >= cal.bmsDeltaTrip) {
+    status = 'WARNING'; severity = 'warning'; event = `Cell Imbalance Warning (${vals.cellDeltaMv} mV >= ${cal.bmsDeltaTrip} mV)`;
+  } else if (vals.kurtosis >= cal.kurtTrip) {
+    status = 'WARNING'; severity = 'warning'; event = `Bearing Impulsive Shock (β₂=${fmt(vals.kurtosis, 2)} >= ${fmt(cal.kurtTrip, 2)})`;
   } else if (health < 40) {
     status = 'CRITICAL'; severity = 'critical'; event = 'Health index below 40%';
   } else if (health < 70) {
@@ -4174,6 +4796,9 @@ window.addEventListener('load', () => {
 
   // Initialize Motor Control Console UI
   if (typeof renderMotorControlUI === 'function') renderMotorControlUI();
+
+  // Initialize Calibration Settings and Safety Trip Badges
+  if (typeof initCalibrationPage === 'function') initCalibrationPage();
 
   // Sidebar entrance
   gsap.from('.sidebar', { x: -30, opacity: 0, duration: 0.5, ease: 'power3.out', clearProps: 'transform,opacity' });

@@ -76,6 +76,33 @@ except Exception as e:
     db_manager = None
     print(f"[DB] Warning: could not initialize DatabaseManager: {e}")
 
+DEFAULT_CALIBRATION = {
+    "currMotorTrip": 4.50,
+    "currTotalTrip": 5.50,
+    "currWarn": 3.20,
+    "currZeroOffset": 2.500,
+    "currSensitivity": 0.100,
+    "vibTrip": 2.50,
+    "vibWarn": 0.71,
+    "vibGood": 0.28,
+    "vibAxialRatio": 1.20,
+    "kurtTrip": 5.00,
+    "tempTrip": 85.0,
+    "tempWarn": 55.0,
+    "tempAmbient": 25.0,
+    "bmsCellMin": 2.80,
+    "bmsPackLow": 10.20,
+    "bmsPackMax": 12.60,
+    "bmsDeltaTrip": 80,
+    "pwmMax": 255,
+    "pwmMin": 150,
+    "slewStep": 15,
+    "slewEnabled": True,
+    "sens": 50,
+    "decayDays": 7,
+    "rulCritical": 4.0
+}
+
 
 def find_esp32_port(preferred="COM5"):
     """Detect the COM port connected to the ESP32."""
@@ -627,6 +654,20 @@ class SCADAHandler(SimpleHTTPRequestHandler):
                 self._send_json(500, {"success": False, "error": str(e)})
                 return
 
+        # 7. Calibration Settings endpoint
+        if clean_path == "/api/calibration":
+            calib_file = ROOT_DIR / "config" / "calibration.json"
+            if calib_file.exists():
+                try:
+                    with open(calib_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    self._send_json(200, {"success": True, "data": data})
+                    return
+                except Exception:
+                    pass
+            self._send_json(200, {"success": True, "data": DEFAULT_CALIBRATION})
+            return
+
         # Fallback to static asset serving
         super().do_GET()
 
@@ -827,6 +868,22 @@ class SCADAHandler(SimpleHTTPRequestHandler):
             else:
                 self._send_json(503, {"success": False, "message": error or "Could not generate reply."})
             return
+
+        # 4. Calibration Settings Save endpoint
+        if clean_path == "/api/calibration":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                raw_body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+                data = json.loads(raw_body)
+                calib_dir = Path(__file__).resolve().parent.parent / "config"
+                calib_dir.mkdir(exist_ok=True)
+                with open(calib_dir / "calibration.json", "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                self._send_json(200, {"success": True, "message": "Calibration settings saved successfully", "data": data})
+                return
+            except Exception as e:
+                self._send_json(500, {"success": False, "message": f"Failed to save calibration: {e}"})
+                return
 
         # Fallback for unrecognized POST
         self.send_response(404)

@@ -1453,3 +1453,135 @@ canvas {
   flex-wrap: wrap;
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   CALIBRATION & SAFETY PROTECTION STUDIO
+   ══════════════════════════════════════════════════════════════════ */
+.calib-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.calib-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+
+.calib-row:hover {
+  border-color: var(--border-firm);
+  background: #fbfaf8;
+}
+
+.calib-row.is-trip {
+  border-left: 3px solid var(--danger);
+}
+
+.calib-row.is-warn {
+  border-left: 3px solid var(--hazard);
+}
+
+.calib-row.is-tune {
+  border-left: 3px solid var(--info);
+}
+
+.calib-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.calib-label {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.calib-val-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .84rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 6px;
+  min-width: 60px;
+  text-align: right;
+  letter-spacing: -0.01em;
+}
+
+.calib-sub {
+  font-size: .71rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.calib-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.calib-slider {
+  flex: 1;
+  height: 6px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.calib-input-num {
+  width: 78px;
+  padding: 5px 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-align: right;
+  transition: border-color .15s ease;
+}
+
+.calib-input-num:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.calib-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: .68rem;
+  color: var(--faint);
+  font-family: monospace;
+  margin-top: -2px;
+}
+
+.save-note.is-dirty {
+  color: var(--hazard);
+  font-weight: 700;
+}
+
+.save-note.is-saved {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+
