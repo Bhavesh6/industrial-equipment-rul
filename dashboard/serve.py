@@ -577,9 +577,19 @@ class SCADAHandler(SimpleHTTPRequestHandler):
         if clean_path == "/api/history":
             if db_manager is not None:
                 try:
-                    limit = 60
+                    limit = 100
+                    if "?" in self.path:
+                        try:
+                            import urllib.parse
+                            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                            if "limit" in q:
+                                limit = max(1, min(500, int(q["limit"][0])))
+                        except Exception:
+                            pass
                     with db_manager.get_connection() as conn:
                         cursor = conn.cursor()
+                        cursor.execute("SELECT count(*) FROM raw_sensor_data")
+                        total_count = cursor.fetchone()[0]
                         cursor.execute("""
                             SELECT r.timestamp, r.device_id, r.battery_voltage, r.motor_voltage,
                                    r.total_current, r.motor_current, r.temperature, r.vibration,
@@ -590,7 +600,7 @@ class SCADAHandler(SimpleHTTPRequestHandler):
                             ORDER BY r.id DESC LIMIT ?
                         """, (limit,))
                         rows = [dict(row) for row in cursor.fetchall()]
-                    self._send_json(200, {"success": True, "count": len(rows), "data": rows})
+                    self._send_json(200, {"success": True, "count": len(rows), "total_count": total_count, "data": rows})
                     return
                 except Exception as e:
                     self._send_json(500, {"success": False, "error": str(e)})

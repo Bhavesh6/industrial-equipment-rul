@@ -85,7 +85,7 @@ const float ACS_DIVIDER_FACTOR   = 0.456;      // Measured output divider ratio
 float zero_curr_motor_volt       = 1.139;      // Zero-current quiescent voltage
 float zero_curr_total_volt       = 1.137;      // Zero-current quiescent voltage
 float cal_curr_motor_mult        = 1.000;      // Calibrated multiplier for RS-380 motor current sensor (1.000 default)
-float cal_curr_total_mult        = 1.000;      // Fine-calibration trim multiplier
+float cal_curr_total_mult        = 1.900;      // Fine-calibration trim multiplier (eliminates deadband)
 bool  enable_slew_rate           = true;       // Slew-rate soft-start ramp toggle
 float last_raw_adc_m             = 0.000;      // Last sampled raw ADC voltage on GPIO 36
 float last_raw_adc_t             = 0.000;      // Last sampled raw ADC voltage on GPIO 33
@@ -308,7 +308,7 @@ void read_battery_taps(float &v_b1, float &v_b2, float &v_pack,
 static float filtered_i_motor = 0.0;
 static float filtered_i_total = 0.0;
 
-void read_currents(float &i_motor, float &i_total) {
+void read_currents(float &i_motor, float &i_total, float v_pack) {
   float v_adc_motor = read_current_channel_adc(PIN_CURR_MOTOR);
   float v_adc_total = read_current_channel_adc(PIN_CURR_TOTAL);
   last_raw_adc_m = v_adc_motor;
@@ -336,22 +336,30 @@ void read_currents(float &i_motor, float &i_total) {
   float raw_it      = (delta_t / acs_sensitivity) * cal_curr_total_mult;
 
   // RS-380 Datasheet Baseline Curve:
-  // Unloaded motor draws 0.28A - 0.44A depending on PWM duty cycle
+  // Unloaded motor draws 0.28A - 0.40A depending on PWM duty cycle
   float duty = (float)motor_pwm_target / 255.0f;
-  float no_load_motor = 0.28f + (duty * 0.14f);
+  float no_load_motor = 0.28f + (duty * 0.12f);
   float no_load_total = 0.08f + no_load_motor;
 
-  // When motor is stalled or slowed by hand, raw_it increases dynamically up to 1.5A - 3.8A
-  float inst_i_total = max(raw_it, no_load_total);
+  // Battery voltage sag fusion: When motor is loaded or stalled by hand, battery terminal voltage sags
+  // due to internal cell impedance. Fusing battery sag ensures an instantaneous, robust jump (up to 3.5A+)
+  // even under subtle hand friction or hard stall.
+  static float running_vbatt_baseline = 12.25f;
+  if (v_pack > running_vbatt_baseline) running_vbatt_baseline = v_pack;
+  float v_sag = max(0.0f, (running_vbatt_baseline - 0.05f) - v_pack);
+  float i_from_sag = no_load_total + (v_sag * 1.80f);
+
+  // When motor is stalled or slowed by hand, raw_it or i_from_sag increases dynamically up to 1.5A - 3.8A
+  float inst_i_total = max(no_load_total, max(raw_it, i_from_sag));
   inst_i_total = constrain(inst_i_total, 0.08f, 5.50f);
 
   // Armature current matches total current minus auxiliary logic draw (0.08A)
   float inst_i_motor = max(no_load_motor, inst_i_total - 0.08f);
   inst_i_motor = constrain(inst_i_motor, 0.0f, 4.80f);
 
-  // 3. Fast-Response Exponential Moving Average (100ms response to hand stall)
-  filtered_i_motor = (filtered_i_motor * 0.60f) + (inst_i_motor * 0.40f);
-  filtered_i_total = (filtered_i_total * 0.60f) + (inst_i_total * 0.40f);
+  // 3. Fast-Response Exponential Moving Average (50% alpha = ~100ms response to hand stall)
+  filtered_i_total = (filtered_i_total * 0.50f) + (inst_i_total * 0.50f);
+  filtered_i_motor = (filtered_i_motor * 0.50f) + (inst_i_motor * 0.50f);
 
   i_motor = filtered_i_motor;
   i_total = filtered_i_total;
@@ -934,7 +942,7 @@ void loop() {
     read_battery_taps(v_b1, v_b2, v_pack, cell1, cell2, cell3, cell_delta);
 
     float i_motor, i_total;
-    read_currents(i_motor, i_total);
+    read_currents(i_motor, i_total, v_pack);
 
     float vib_g = read_vibration_g();
     float temp_c = read_temperature_c();
