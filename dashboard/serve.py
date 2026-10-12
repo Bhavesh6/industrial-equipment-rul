@@ -419,18 +419,18 @@ class HardwareSerialBridge:
                 msgs.append("USB Serial")
             except Exception as e:
                 msgs.append(f"Serial err: {e}")
-
-        # 2. Send via Wireless UDP to ESP32 IP
-        target_ip = self.wireless_ip or "192.168.4.1"
-        try:
-            udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            udp_sock.settimeout(0.3)
-            udp_sock.sendto(cmd_str.encode("utf-8"), (target_ip, self.udp_port))
-            udp_sock.close()
-            success = True
-            msgs.append(f"Wireless UDP ({target_ip})")
-        except Exception as e:
-            msgs.append(f"UDP err: {e}")
+        else:
+            # 2. Fallback to Wireless UDP if USB Serial is not active
+            target_ip = self.wireless_ip or "192.168.4.1"
+            try:
+                udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                udp_sock.settimeout(0.3)
+                udp_sock.sendto(cmd_str.encode("utf-8"), (target_ip, self.udp_port))
+                udp_sock.close()
+                success = True
+                msgs.append(f"Wireless UDP ({target_ip})")
+            except Exception as e:
+                msgs.append(f"UDP err: {e}")
 
         with self.lock:
             self.last_command_sent = {"cmd": cmd_str, "time": time.time(), "transport": self.transport}

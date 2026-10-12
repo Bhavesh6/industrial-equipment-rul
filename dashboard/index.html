@@ -2836,7 +2836,9 @@ async function sendMotorCmd(action, value = null) {
     motorControlState.safetyTripped = false;
     motorControlState.safetyTripReason = 'NONE';
   } else if (action === 'reverse') {
-    motorControlState.direction = motorControlState.direction === 'FWD' ? 'REV' : 'FWD';
+    const nextDir = motorControlState.direction === 'FWD' ? 'REV' : 'FWD';
+    motorControlState.direction = nextDir;
+    action = nextDir === 'REV' ? 'dir_rev' : 'dir_fwd';
   }
   renderMotorControlUI();
 

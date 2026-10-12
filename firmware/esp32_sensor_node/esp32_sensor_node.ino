@@ -540,12 +540,31 @@ String execute_command(String cmd) {
     return String("[CMD] Motor Started @ PWM ") + String(encoder_position);
   } else if (cmd == "REVERSE" || cmd == "DIR=TOGGLE") {
     motor_dir_forward = !motor_dir_forward;
+    if (motor_running && motor_pwm_target > 0) {
+      apply_motor_speed(0, motor_dir_forward);
+      delay(120);
+      apply_motor_speed(motor_pwm_target, motor_dir_forward);
+    }
     return String("[CMD] Direction toggled: ") + String(motor_dir_forward ? "FWD" : "REV");
   } else if (cmd == "DIR=FWD") {
-    motor_dir_forward = true;
+    if (!motor_dir_forward) {
+      motor_dir_forward = true;
+      if (motor_running && motor_pwm_target > 0) {
+        apply_motor_speed(0, true);
+        delay(120);
+        apply_motor_speed(motor_pwm_target, true);
+      }
+    }
     return "[CMD] Direction set: FWD";
   } else if (cmd == "DIR=REV") {
-    motor_dir_forward = false;
+    if (motor_dir_forward) {
+      motor_dir_forward = false;
+      if (motor_running && motor_pwm_target > 0) {
+        apply_motor_speed(0, false);
+        delay(120);
+        apply_motor_speed(motor_pwm_target, false);
+      }
+    }
     return "[CMD] Direction set: REV";
   } else if (cmd == "ESTOP" || cmd == "EMERGENCY_STOP") {
     motor_running = false;
