@@ -380,7 +380,9 @@ class HardwareSerialBridge:
                             raw_line = self.ser.readline()
                             if not raw_line:
                                 continue
-                            line = raw_line.decode("utf-8", errors="ignore").strip()
+                    except (serial.SerialException, PermissionError, OSError) as e:
+                        print(f"[SERIAL] Device disconnected or dropped on {target_port}: {e}")
+                        break
                     except Exception:
                         continue
 
@@ -470,9 +472,20 @@ class HardwareSerialBridge:
                 msgs.append("USB Serial")
             except Exception as e:
                 msgs.append(f"Serial err: {e}")
+                # Port is broken, disconnected, or dropped by Windows: cleanup zombie handle
+                try:
+                    if self.ser:
+                        self.ser.close()
+                except Exception:
+                    pass
+                with self.lock:
+                    self.ser = None
+                    self.active_port = None
+                    if self.transport == "USB_SERIAL":
+                        self.transport = "DISCONNECTED"
 
-        # 2. Send via Wireless (UDP + HTTP REST) if wireless is active OR serial is unavailable
-        if has_wireless or not can_serial:
+        # 2. Send via Wireless (UDP + HTTP REST) if wireless is active OR serial failed / disconnected
+        if not success or has_wireless:
             # 2a. Wireless UDP Datagram
             try:
                 udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
