@@ -113,24 +113,29 @@ def find_esp32_port(preferred="COM5"):
         if not ports:
             return None
 
-        # 1. Preferred port match if currently physically plugged in
+        # 1. Preferred port match if currently physically plugged in (and not bluetooth)
         for p in ports:
             if p.device.upper() == preferred.upper():
-                return p.device
+                desc = (p.description or "").lower()
+                hwid = (p.hwid or "").lower()
+                if "bluetooth" not in desc and "bthenum" not in hwid and "bluetooth" not in hwid:
+                    return p.device
 
         # 2. Match known ESP32 USB-to-UART bridge chipsets (CP210x, CH340, CH341, CH9102, FTDI)
         esp_keywords = ["cp210", "ch340", "ch341", "ch9102", "ftdi", "uart", "usb serial", "silicon labs", "espressif"]
         for p in ports:
             desc = (p.description or "").lower()
             hwid = (p.hwid or "").lower()
-            if any(k in desc or k in hwid for k in esp_keywords):
-                if "bluetooth" not in desc:
-                    return p.device
+            is_bt = "bluetooth" in desc or "bthenum" in hwid or "bluetooth" in hwid
+            if not is_bt and any(k in desc or k in hwid for k in esp_keywords):
+                return p.device
 
         # 3. Fallback: Any active physical USB serial port (excluding Bluetooth and motherboard COM1)
         for p in ports:
             desc = (p.description or "").lower()
-            if "bluetooth" not in desc and p.device.upper() != "COM1":
+            hwid = (p.hwid or "").lower()
+            is_bt = "bluetooth" in desc or "bthenum" in hwid or "bluetooth" in hwid
+            if not is_bt and p.device.upper() != "COM1":
                 return p.device
 
         return None
