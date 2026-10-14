@@ -454,10 +454,13 @@ class HardwareSerialBridge:
         success = False
         msgs = []
 
-        # 1. Send via USB Serial if connected
+        # Check active transports
         with self.lock:
-            can_serial = self.ser and self.ser.is_open
+            can_serial = bool(self.ser and self.ser.is_open)
+            target_ip = self.wireless_ip or "192.168.4.1"
+            has_wireless = (time.time() - self.last_wireless_packet_time < 6.0) or (self.transport == "WIRELESS_WIFI")
 
+        # 1. Send via USB Serial if connected
         if can_serial:
             try:
                 msg = (cmd_str + "\n").encode("utf-8")
@@ -467,18 +470,41 @@ class HardwareSerialBridge:
                 msgs.append("USB Serial")
             except Exception as e:
                 msgs.append(f"Serial err: {e}")
-        else:
-            # 2. Fallback to Wireless UDP if USB Serial is not active
-            target_ip = self.wireless_ip or "192.168.4.1"
+
+        # 2. Send via Wireless (UDP + HTTP REST) if wireless is active OR serial is unavailable
+        if has_wireless or not can_serial:
+            # 2a. Wireless UDP Datagram
             try:
                 udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                 udp_sock.settimeout(0.3)
-                udp_sock.sendto(cmd_str.encode("utf-8"), (target_ip, self.udp_port))
+                udp_payload = cmd_str.encode("utf-8")
+                udp_sock.sendto(udp_payload, (target_ip, self.udp_port))
+                # Also send to general AP gateway in case target_ip shifted
+                if target_ip != "192.168.4.1":
+                    try:
+                        udp_sock.sendto(udp_payload, ("192.168.4.1", self.udp_port))
+                    except Exception:
+                        pass
                 udp_sock.close()
                 success = True
                 msgs.append(f"Wireless UDP ({target_ip})")
             except Exception as e:
                 msgs.append(f"UDP err: {e}")
+
+            # 2b. High-Reliability HTTP REST Call to ESP32 WebServer (TCP guarantee)
+            try:
+                import urllib.parse
+                import urllib.request
+                enc_cmd = urllib.parse.quote(cmd_str)
+                http_url = f"http://{target_ip}/cmd?c={enc_cmd}"
+                req = urllib.request.Request(http_url, headers={"User-Agent": "SCADA-Bridge"})
+                with urllib.request.urlopen(req, timeout=0.5) as resp:
+                    if resp.status == 200:
+                        success = True
+                        msgs.append(f"HTTP REST ({target_ip})")
+            except Exception:
+                pass  # UDP was already dispatched, HTTP is non-blocking bonus assurance
 
         with self.lock:
             self.last_command_sent = {"cmd": cmd_str, "time": time.time(), "transport": self.transport}

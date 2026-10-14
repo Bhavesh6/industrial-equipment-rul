@@ -4686,7 +4686,15 @@ async function tick() {
         updateAlerts(r);
         if (currentPage === 'prognostics') refreshPrognostics();
         tickCount++;
-        document.getElementById('liveHz').textContent = isConnected ? '10' : '2';
+        const nowMs = Date.now();
+        if (!window._hzLastTime) { window._hzLastTime = nowMs; window._hzCount = 0; }
+        window._hzCount++;
+        if (nowMs - window._hzLastTime >= 1000) {
+          const dynamicHz = Math.max(1, Math.round((window._hzCount * 1000) / (nowMs - window._hzLastTime)));
+          document.getElementById('liveHz').textContent = isConnected ? dynamicHz : '2';
+          window._hzLastTime = nowMs;
+          window._hzCount = 0;
+        }
         isPollingTelemetry = false;
         setTimeout(tick, 100);
         return;

@@ -906,11 +906,15 @@ void loop() {
     if (len > 0) {
       udp_buf[len] = 0;
       String cmd = String(udp_buf);
-      String res = execute_command(cmd);
-      // Reply to sender
-      udp.beginPacket(udp.remoteIP(), udp.remotePort());
-      udp.write((const uint8_t*)res.c_str(), res.length());
-      udp.endPacket();
+      cmd.trim();
+      // Ignore telemetry broadcast echoes (only execute text commands)
+      if (!cmd.startsWith("{") && cmd.length() > 0) {
+        String res = execute_command(cmd);
+        // Reply to sender
+        udp.beginPacket(udp.remoteIP(), udp.remotePort());
+        udp.write((const uint8_t*)res.c_str(), res.length());
+        udp.endPacket();
+      }
     }
   }
 
