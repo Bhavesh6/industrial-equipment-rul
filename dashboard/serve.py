@@ -458,7 +458,7 @@ class HardwareSerialBridge:
 
         # Check active transports
         with self.lock:
-            can_serial = bool(self.ser and self.ser.is_open)
+            can_serial = bool(self.ser and self.ser.is_open and self.transport != "WIRELESS_WIFI")
             target_ip = self.wireless_ip or "192.168.4.1"
             has_wireless = (time.time() - self.last_wireless_packet_time < 6.0) or (self.transport == "WIRELESS_WIFI")
 
@@ -492,13 +492,22 @@ class HardwareSerialBridge:
                 udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                 udp_sock.settimeout(0.3)
                 udp_payload = cmd_str.encode("utf-8")
-                udp_sock.sendto(udp_payload, (target_ip, self.udp_port))
-                # Also send to general AP gateway in case target_ip shifted
+                # Send unicast to detected IP
+                try:
+                    udp_sock.sendto(udp_payload, (target_ip, self.udp_port))
+                except Exception:
+                    pass
+                # Send to AP default gateway if different
                 if target_ip != "192.168.4.1":
                     try:
                         udp_sock.sendto(udp_payload, ("192.168.4.1", self.udp_port))
                     except Exception:
                         pass
+                # Send general broadcast to subnet
+                try:
+                    udp_sock.sendto(udp_payload, ("255.255.255.255", self.udp_port))
+                except Exception:
+                    pass
                 udp_sock.close()
                 success = True
                 msgs.append(f"Wireless UDP ({target_ip})")
