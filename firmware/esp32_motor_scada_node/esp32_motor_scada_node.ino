@@ -109,7 +109,8 @@ String      safety_trip_reason   = "NONE";
 const float BMS_MIN_CELL_VOLT    = 2.65;       // Safe discharge cutoff floor for 18650 cells under load
 const float BMS_MAX_CELL_VOLT    = 4.35;       // Maximum charge warning limit (fire prevention)
 const float BMS_MIN_PACK_VOLT    = 8.40;       // Minimum pack cut-off
-bool        bms_override_demo    = true;       // Enabled by default so bench / USB testing runs reliably without 3S pack trip
+const float BMS_MAX_CELL_DELTA   = 0.85;       // Dangerous pack imbalance
+bool        bms_override_demo    = false;      // Demo override toggle
 
 // ------------------------------------------------------------------------------
 // WIRELESS (WI-FI, UDP, HTTP, NVS) INSTANCES & CONFIG
@@ -169,16 +170,18 @@ void IRAM_ATTR isr_encoder_clk() {
       } else {
         encoder_position = 255;
       }
-      motor_running = true; // Auto-engage motor when dialed up!
+      // Note: rotating knob presets speed, but does NOT auto-start motor if stopped.
+      // User must click the knob button (or web Start) to engage motor power.
       safety_tripped = false;
-      safety_trip_reason = "NONE";
     } else {
       // Counter-clockwise (decrease speed)
       if (encoder_position > 150) {
         encoder_position -= 10;
       } else {
         encoder_position = 0; // Stop motor cleanly when dialed below min threshold
-        motor_running = false;
+        if (motor_running) {
+          motor_running = false;
+        }
       }
     }
     last_clk_time = now;
