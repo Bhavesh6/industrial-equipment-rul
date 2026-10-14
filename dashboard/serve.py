@@ -105,19 +105,35 @@ DEFAULT_CALIBRATION = {
 
 
 def find_esp32_port(preferred="COM5"):
-    """Detect the COM port connected to the ESP32."""
+    """Auto-detect and scan the COM port connected to the ESP32."""
     if not HAS_SERIAL:
         return None
     try:
         ports = list(serial.tools.list_ports.comports())
+        if not ports:
+            return None
+
+        # 1. Preferred port match if currently physically plugged in
         for p in ports:
             if p.device.upper() == preferred.upper():
                 return p.device
+
+        # 2. Match known ESP32 USB-to-UART bridge chipsets (CP210x, CH340, CH341, CH9102, FTDI)
+        esp_keywords = ["cp210", "ch340", "ch341", "ch9102", "ftdi", "uart", "usb serial", "silicon labs", "espressif"]
         for p in ports:
             desc = (p.description or "").lower()
-            if any(k in desc for k in ["cp210", "ch340", "uart", "usb serial", "silicon labs"]):
+            hwid = (p.hwid or "").lower()
+            if any(k in desc or k in hwid for k in esp_keywords):
+                if "bluetooth" not in desc:
+                    return p.device
+
+        # 3. Fallback: Any active physical USB serial port (excluding Bluetooth and motherboard COM1)
+        for p in ports:
+            desc = (p.description or "").lower()
+            if "bluetooth" not in desc and p.device.upper() != "COM1":
                 return p.device
-        return preferred if ports else None
+
+        return None
     except Exception:
         return preferred
 
