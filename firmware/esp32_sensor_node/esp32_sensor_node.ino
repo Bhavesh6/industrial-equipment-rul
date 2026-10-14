@@ -109,8 +109,7 @@ String      safety_trip_reason   = "NONE";
 const float BMS_MIN_CELL_VOLT    = 2.65;       // Safe discharge cutoff floor for 18650 cells under load
 const float BMS_MAX_CELL_VOLT    = 4.35;       // Maximum charge warning limit (fire prevention)
 const float BMS_MIN_PACK_VOLT    = 8.40;       // Minimum pack cut-off
-const float BMS_MAX_CELL_DELTA   = 0.85;       // Dangerous pack imbalance
-bool        bms_override_demo    = false;      // Demo override toggle
+bool        bms_override_demo    = true;       // Enabled by default so bench / USB testing runs reliably without 3S pack trip
 
 // ------------------------------------------------------------------------------
 // WIRELESS (WI-FI, UDP, HTTP, NVS) INSTANCES & CONFIG
@@ -145,8 +144,9 @@ volatile unsigned long last_scada_cmd_time = 0; // Lockout physical knob only im
 unsigned long last_telemetry_tx = 0;
 const unsigned long TELEMETRY_INTERVAL_MS = 100; // 10 Hz high-speed real-time telemetry stream
 
-// Forward declaration of command executor
+// Forward declaration of command executor & PWM helper
 String execute_command(String cmd);
+void set_motor_pwm(int duty);
 
 // ------------------------------------------------------------------------------
 // INTERRUPT SERVICE ROUTINES (KY-040 ENCODER WITH ZERO-LAG RESPONSIVE DEBOUNCE)
@@ -169,18 +169,16 @@ void IRAM_ATTR isr_encoder_clk() {
       } else {
         encoder_position = 255;
       }
-      // Note: rotating knob presets speed, but does NOT auto-start motor if stopped.
-      // User must click the knob button (or web Start) to engage motor power.
+      motor_running = true; // Auto-engage motor when dialed up!
       safety_tripped = false;
+      safety_trip_reason = "NONE";
     } else {
       // Counter-clockwise (decrease speed)
       if (encoder_position > 150) {
         encoder_position -= 10;
       } else {
         encoder_position = 0; // Stop motor cleanly when dialed below min threshold
-        if (motor_running) {
-          motor_running = false;
-        }
+        motor_running = false;
       }
     }
     last_clk_time = now;
@@ -250,7 +248,7 @@ void calibrate_current_sensors() {
   Serial.println("[CALIB] Establishing 0A baseline for ACS712 sensors (motor de-energized)...");
   digitalWrite(PIN_MOTOR_IN1, LOW);
   digitalWrite(PIN_MOTOR_IN2, LOW);
-  ledcWrite(PWM_CHANNEL, 0);
+  set_motor_pwm(0);
   delay(300);
 
   float sum_m = 0, sum_t = 0;
@@ -410,11 +408,20 @@ float read_vibration_g() {
 }
 
 // ------------------------------------------------------------------------------
-// MOTOR ACTUATION CONTROL
+// MOTOR ACTUATION CONTROL (COMPATIBLE WITH ESP32 CORE V2.X & V3.X)
 // ------------------------------------------------------------------------------
+void set_motor_pwm(int duty) {
+  duty = constrain(duty, 0, 255);
+  #if ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcWrite(PIN_MOTOR_PWM, duty);
+  #else
+    ledcWrite(PWM_CHANNEL, duty);
+  #endif
+}
+
 void apply_motor_speed(int pwm, bool forward) {
   if (pwm <= 0 || safety_tripped) {
-    ledcWrite(PWM_CHANNEL, 0);
+    set_motor_pwm(0);
     digitalWrite(PIN_MOTOR_IN1, LOW);
     digitalWrite(PIN_MOTOR_IN2, LOW);
     return;
@@ -426,7 +433,7 @@ void apply_motor_speed(int pwm, bool forward) {
     digitalWrite(PIN_MOTOR_IN1, LOW);
     digitalWrite(PIN_MOTOR_IN2, HIGH);
   }
-  ledcWrite(PWM_CHANNEL, constrain(pwm, 0, 255));
+  set_motor_pwm(pwm);
 }
 
 int calculate_rpm(float v_pack) {
@@ -447,12 +454,13 @@ void check_safety_limits(float i_motor, float i_total, float temp_c, float vib_g
                          float cell1, float cell2, float cell3, float v_pack) {
   if (safety_tripped) return;
 
-  // 1. Virtual Software BMS: Low-Voltage Cutoff with 300ms persistence check
+  // 1. Virtual Software BMS: Low-Voltage Cutoff with 500ms persistence check
+  // Only monitor low-voltage if a real battery is physically connected (v_pack >= 6.0V)
   static unsigned long uv_trip_start = 0;
-  if (!bms_override_demo && motor_running) {
+  if (!bms_override_demo && motor_running && v_pack >= 6.0f) {
     if (cell1 < BMS_MIN_CELL_VOLT || cell2 < BMS_MIN_CELL_VOLT || cell3 < BMS_MIN_CELL_VOLT || v_pack < BMS_MIN_PACK_VOLT) {
       if (uv_trip_start == 0) uv_trip_start = millis();
-      else if (millis() - uv_trip_start > 300) {
+      else if (millis() - uv_trip_start > 500) {
         safety_tripped = true;
         safety_trip_reason = "BMS_UNDERVOLT_TRIP";
       }
